@@ -1,0 +1,165 @@
+:root {
+	--font-body: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+	--font-display: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+	--musha-ink: #062f33;
+	--musha-deep: #063f3a;
+	--musha-teal: #0b766d;
+	--musha-emerald: #258f6c;
+	--musha-lime: #8fca4d;
+	--musha-mist: #eef7f1;
+	--musha-pale: #e4f0e6;
+	--musha-line: #d8e7df;
+	--musha-muted: #6f8c83;
+	--musha-clay: #c97955;
+	--musha-surface: #fbfdfb;
+}
+
+html {
+	font-family: var(--font-body);
+	background: var(--musha-surface);
+}
+
+body {
+	margin: 0;
+	color: var(--musha-ink);
+	font-family: var(--font-body);
+	font-size: 16px;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+	font-family: inherit;
+}
+
+::selection {
+	background: var(--musha-lime);
+	color: var(--musha-ink);
+}
+
+.musha-logo {
+	display: block;
+	width: 58px;
+	height: 58px;
+	flex: 0 0 58px;
+	border-radius: 16px;
+	background: #fff;
+	box-shadow: 0 7px 20px rgb(6 47 51 / 14%);
+	object-fit: contain;
+}
+
+.musha-logo-large {
+	width: 132px;
+	height: 132px;
+	flex-basis: 132px;
+	border-radius: 24px;
+}
+
+.musha-logo-lockup {
+	display: flex;
+	align-items: center;
+	gap: 11px;
+}
+
+.musha-logo-lockup strong,
+.musha-logo-lockup small {
+	display: block;
+}
+
+.musha-logo-lockup strong {
+	color: currentColor;
+	font-family: var(--font-display);
+	font-size: 17px;
+	font-weight: 800;
+	letter-spacing: -0.06em;
+}
+
+.musha-logo-lockup small {
+	color: var(--musha-muted);
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	margin-top: 3px;
+	text-transform: uppercase;
+}
+
+.logo-wordmark {
+	width: 190px;
+	height: auto;
+	filter: drop-shadow(0 9px 20px rgb(6 47 51 / 9%));
+}
+
+/* Shared readability floor for the product surfaces. Page-specific styles can
+   still create hierarchy, but supporting copy and controls should remain easy
+   to read on a laptop or phone. */
+.admin-shell .nav-label,
+.admin-shell .sidebar-foot small,
+.admin-shell .eyebrow {
+	font-size: 11px !important;
+}
+
+.admin-shell label {
+	font-size: 12px !important;
+}
+
+.admin-shell input,
+.admin-shell select,
+.admin-shell textarea,
+.admin-shell button {
+	font-size: 13px;
+}
+
+.admin-shell .page-heading p:not(.eyebrow),
+.admin-shell .intro p:not(.eyebrow),
+.admin-shell .gate > p:not(.eyebrow) {
+	font-size: 15px !important;
+	line-height: 1.65;
+}
+
+.admin-shell .metric-card span,
+.admin-shell .metric-card small,
+.admin-shell .summary-row span,
+.admin-shell .dashboard-empty p,
+.admin-shell .attention-info small,
+.admin-shell .activity-row small,
+.admin-shell .alert-strip small,
+.admin-shell .table-row small,
+.admin-shell .org-cell small,
+.admin-shell .context,
+.admin-shell .date,
+.admin-shell .empty p {
+	font-size: 11px !important;
+}
+
+.admin-shell .metric-card strong,
+.admin-shell .summary-row strong {
+	font-size: 30px;
+}
+
+.admin-shell .small-link,
+.admin-shell .alert-strip a,
+.admin-shell .primary,
+.admin-shell .toolbar select,
+.admin-shell .search input {
+	font-size: 13px !important;
+}
+
+@media (max-width: 760px) {
+	.main-column,
+	.content,
+	.site-shell,
+	main {
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	.musha-logo {
+		width: 52px;
+		height: 52px;
+		flex-basis: 52px;
+		border-radius: 14px;
+	}
+}
