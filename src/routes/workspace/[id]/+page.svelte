@@ -222,7 +222,7 @@
 			{#if data.activity.length === 0}<p class="quiet">
 					Activity will appear as your team adds and updates records.
 				</p>{:else}<div class="activity-list">
-					{#each data.activity as entry (entry.id)}<a
+					{#each data.activity.slice(0, 5) as entry (entry.id)}<a
 							href={resolve(`/workspace/${data.organization.id}/${actionLink(entry.entity_type)}`)}
 							><span>·</span>
 							<div>
@@ -682,6 +682,20 @@
 	}
 	.full {
 		width: 100%;
+	}
+	.readiness-panel .primary.full {
+		position: relative;
+		box-sizing: border-box;
+		max-width: 100%;
+		min-height: 52px;
+		padding: 0 54px 0 20px;
+		text-align: center;
+	}
+	.readiness-panel .primary.full span {
+		position: absolute;
+		right: 19px;
+		top: 50%;
+		transform: translateY(-50%);
 	}
 	.readiness-meta {
 		display: flex;

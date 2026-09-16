@@ -91,18 +91,26 @@
 	const props = $props<{
 		data: WorkspaceData;
 		active: string;
+		profileId?: string | null;
 		form?: { message?: string; success?: boolean } | null;
 	}>();
 	const data = $derived(props.data as WorkspaceData);
 	const active = $derived(props.active);
+	const profileId = $derived(props.profileId ?? '');
 	const today = new Date().toISOString().slice(0, 10);
 	let selectedPersonId = $state('');
+	let profileOpen = $state(false);
 
 	const tenantPeople = $derived(
 		data.people.filter((person: Person) => person.person_type === 'tenant')
 	);
 	$effect(() => {
-		if (!selectedPersonId && tenantPeople.length) selectedPersonId = tenantPeople[0].id;
+		if (profileId) {
+			selectedPersonId = profileId;
+			profileOpen = true;
+		} else if (!selectedPersonId && tenantPeople.length) {
+			selectedPersonId = tenantPeople[0].id;
+		}
 	});
 	const selectedPerson = $derived(
 		tenantPeople.find((person: Person) => person.id === selectedPersonId) ?? null
@@ -119,6 +127,13 @@
 	);
 	const selectedTenancyIds = $derived(
 		new Set(selectedTenancies.map((tenancy: Tenancy) => tenancy.id))
+	);
+	const selectedDocuments = $derived(
+		data.documents.filter(
+			(document: Document) =>
+				document.person_id === selectedPersonId ||
+				(document.tenancy_id ? selectedTenancyIds.has(document.tenancy_id) : false)
+		)
 	);
 	const selectedCharges = $derived(
 		data.charges.filter((charge: Charge) => selectedTenancyIds.has(charge.tenancy_id))
@@ -229,6 +244,31 @@
 	const initials = (person: Person) =>
 		`${person.first_name.slice(0, 1)}${person.last_name.slice(0, 1)}`.toUpperCase();
 	const label = (value: string) => value.replaceAll('_', ' ');
+	const tenantTenanciesFor = (personId: string) =>
+		data.tenancies.filter((tenancy: Tenancy) =>
+			data.parties.some(
+				(party: Party) =>
+					party.tenancy_id === tenancy.id &&
+					party.person_id === personId &&
+					party.role === 'primary'
+			)
+		);
+	const currentTenancyFor = (personId: string) =>
+		tenantTenanciesFor(personId).find((tenancy: Tenancy) => tenancy.status === 'active') ??
+		tenantTenanciesFor(personId)[0] ??
+		null;
+	const spaceKindLabel = (kind?: string | null) =>
+		kind === 'unit'
+			? 'Whole unit'
+			: kind === 'room'
+				? 'Room / section'
+				: kind === 'bed'
+					? 'Bed'
+					: kind
+						? label(kind)
+						: 'Not assigned';
+	const tenantProfileHref = (personId: string) =>
+		`${href('tenants')}?person=${encodeURIComponent(personId)}`;
 </script>
 
 <section class="people-workspace" aria-labelledby="people-title">
@@ -466,46 +506,77 @@
 				</form>{/if}
 		</section>
 	{:else if active === 'tenants'}
-		<div class="profile-layout">
-			<section class="panel profile-list">
-				<div class="panel-heading">
-					<div>
-						<p class="eyebrow">Tenant register</p>
-						<h2>Tenant profiles</h2>
-						<p>Select a person to review their operating history.</p>
+		<div class="tenant-view">
+			{#if !profileId}<section class="panel tenant-table-panel">
+					<div class="panel-heading">
+						<div>
+							<p class="eyebrow">Tenant register</p>
+							<h2>Tenant profiles</h2>
+							<p>See who is connected to each property, space, and lease at a glance.</p>
+						</div>
+						<span class="count">{tenantPeople.length}</span>
 					</div>
-					<span class="count">{tenantPeople.length}</span>
-				</div>
-				{#if !tenantPeople.length}<div class="empty">
-						<strong>No tenant profiles yet.</strong>
-						<p>Add the first tenant to begin.</p>
-					</div>{:else}<div class="people-list">
-						{#each tenantPeople as person (person.id)}<button
-								class:selected={selectedPersonId === person.id}
-								class="person-card"
-								type="button"
-								onclick={() => (selectedPersonId = person.id)}
-								><span class="avatar large">{initials(person)}</span><span
-									><strong>{person.first_name} {person.last_name}</strong><small
-										>{person.email ?? person.phone ?? 'No contact details'}</small
-									></span
-								><span class="mini-status"
-									>{data.tenancies.filter(
-										(tenancy: Tenancy) =>
-											data.parties.some(
-												(party: Party) =>
-													party.tenancy_id === tenancy.id &&
-													party.person_id === person.id &&
-													party.role === 'primary'
-											) && tenancy.status === 'active'
-									).length
-										? 'Active'
-										: 'History'}</span
-								></button
-							>{/each}
-					</div>{/if}
-			</section>
-			{#if selectedPerson}<section class="profile-detail">
+					{#if !tenantPeople.length}<div class="empty">
+							<strong>No tenant profiles yet.</strong>
+							<p>Add the first tenant to begin.</p>
+						</div>{:else}<div class="tenant-table-wrap">
+							<table class="tenant-table">
+								<thead>
+									<tr
+										><th>Tenant</th><th>Property & space</th><th>Occupancy</th><th>Rent</th><th
+											>Status</th
+										><th><span class="sr-only">Actions</span></th></tr
+									>
+								</thead>
+								<tbody>
+									{#each tenantPeople as person (person.id)}
+										{@const tenancy = currentTenancyFor(person.id)}
+										{@const assignedSpace = tenancy
+											? data.spaces.find((space: Space) => space.id === tenancy.space_id)
+											: null}
+										<tr>
+											<td>
+												<div class="tenant-cell">
+													<span class="avatar">{initials(person)}</span><span
+														><strong>{person.first_name} {person.last_name}</strong><small
+															>{person.email ?? person.phone ?? 'No contact details'}</small
+														></span
+													>
+												</div>
+											</td>
+											<td>
+												{#if tenancy}<strong>{propertyName(tenancy.space_id)}</strong><small
+														>{spaceName(tenancy.space_id)}</small
+													>{:else}<span class="table-muted">Not assigned</span>{/if}
+											</td>
+											<td
+												><span class="occupancy-pill">{spaceKindLabel(assignedSpace?.kind)}</span
+												></td
+											>
+											<td
+												>{#if tenancy}<strong>{money(tenancy.rent_amount)}</strong><small
+														>{label(tenancy.billing_frequency)}</small
+													>{:else}<span class="table-muted">—</span>{/if}</td
+											>
+											<td
+												><span class={`badge ${tenancy?.status ?? 'draft'}`}
+													>{tenancy ? label(tenancy.status) : 'Unassigned'}</span
+												></td
+											>
+											<td class="table-action">
+												<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+												<a class="view-button" href={tenantProfileHref(person.id)}
+													>View <span aria-hidden="true">→</span></a
+												>
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>{/if}
+				</section>{/if}
+			{#if selectedPerson && (profileOpen || profileId)}<section class="profile-detail">
+					<a class="back-to-table" href={href('tenants')}>← Back to tenant table</a>
 					<div class="profile-hero">
 						<span class="avatar xl">{initials(selectedPerson)}</span>
 						<div>
@@ -514,69 +585,72 @@
 							<p>{selectedPerson.email ?? 'No email'} · {selectedPerson.phone ?? 'No phone'}</p>
 						</div>
 					</div>
-					<section class="panel portal-panel">
-						<div class="panel-heading">
-							<div>
-								<p class="eyebrow">Tenant portal</p>
-								<h3>
-									{selectedPerson.user_id
-										? 'Portal access is active'
-										: 'Give this tenant portal access'}
-								</h3>
-								<p>
-									{selectedPerson.user_id
-										? 'The tenant can sign in to view their lease, balance, invoices, documents, and maintenance updates.'
-										: 'Send a secure invitation so the tenant can see their own records and raise maintenance requests.'}
-								</p>
+					<div class="profile-summary">
+						<section class="panel portal-panel">
+							<div class="panel-heading">
+								<div>
+									<p class="eyebrow">Tenant portal</p>
+									<h3>
+										{selectedPerson.user_id
+											? 'Portal access is active'
+											: 'Give this tenant portal access'}
+									</h3>
+									<p>
+										{selectedPerson.user_id
+											? 'The tenant can sign in to view their lease, balance, invoices, documents, and maintenance updates.'
+											: 'Send a secure invitation so the tenant can see their own records and raise maintenance requests.'}
+									</p>
+								</div>
+								<span class:portal-active={Boolean(selectedPerson.user_id)} class="portal-status">
+									{selectedPerson.user_id ? 'Connected' : 'Not connected'}
+								</span>
 							</div>
-							<span class:portal-active={Boolean(selectedPerson.user_id)} class="portal-status">
-								{selectedPerson.user_id ? 'Connected' : 'Not connected'}
-							</span>
-						</div>
-						<form method="POST" action="?/createTenantPortalAccess" class="portal-form">
-							<input type="hidden" name="person_id" value={selectedPerson.id} />
-							<label
-								>Portal email<input
-									name="email"
-									type="email"
-									value={selectedPerson.email ?? ''}
-									required
-									placeholder="tenant@example.com"
-								/></label
-							><button class="secondary" type="submit"
-								>{selectedPerson.user_id
-									? 'Resend portal invitation'
-									: 'Provision tenant portal'}</button
-							>
-						</form>
-					</section>
-					<section class="panel">
-						<div class="panel-heading">
-							<div>
-								<p class="eyebrow">Payment performance</p>
-								<h3>How this tenancy is tracking</h3>
-							</div>
-							<span class="performance-badge">{performance(selectedPerson.id).rate}% collected</span
-							>
-						</div>
-						<div class="performance-grid">
-							<div>
-								<strong>{money(performance(selectedPerson.id).collected)}</strong><small
-									>Collected of {money(performance(selectedPerson.id).billed)}</small
+							<form method="POST" action="?/createTenantPortalAccess" class="portal-form">
+								<input type="hidden" name="person_id" value={selectedPerson.id} />
+								<label
+									>Portal email<input
+										name="email"
+										type="email"
+										value={selectedPerson.email ?? ''}
+										required
+										placeholder="tenant@example.com"
+									/></label
+								><button class="secondary" type="submit"
+									>{selectedPerson.user_id
+										? 'Resend portal invitation'
+										: 'Provision tenant portal'}</button
+								>
+							</form>
+						</section>
+						<section class="panel">
+							<div class="panel-heading">
+								<div>
+									<p class="eyebrow">Payment performance</p>
+									<h3>How this tenancy is tracking</h3>
+								</div>
+								<span class="performance-badge"
+									>{performance(selectedPerson.id).rate}% collected</span
 								>
 							</div>
-							<div>
-								<strong>{money(performance(selectedPerson.id).overdue)}</strong><small
-									>Overdue balance</small
-								>
+							<div class="performance-grid">
+								<div>
+									<strong>{money(performance(selectedPerson.id).collected)}</strong><small
+										>Collected of {money(performance(selectedPerson.id).billed)}</small
+									>
+								</div>
+								<div>
+									<strong>{money(performance(selectedPerson.id).overdue)}</strong><small
+										>Overdue balance</small
+									>
+								</div>
+								<div>
+									<strong>{performance(selectedPerson.id).paidOnTime}</strong><small
+										>Paid on time</small
+									>
+								</div>
 							</div>
-							<div>
-								<strong>{performance(selectedPerson.id).paidOnTime}</strong><small
-									>Paid on time</small
-								>
-							</div>
-						</div>
-					</section>
+						</section>
+					</div>
 					<details class="panel disclosure">
 						<summary>Edit tenant information</summary>
 						<form method="POST" action="?/updatePerson" class="form-stack">
@@ -621,69 +695,111 @@
 							><button class="secondary" type="submit">Save profile</button>
 						</form>
 					</details>
-					<section class="panel">
+					<section class="panel profile-documents">
 						<div class="panel-heading">
 							<div>
-								<p class="eyebrow">Lease history</p>
-								<h3>Current and previous leases</h3>
+								<p class="eyebrow">Attached documents</p>
+								<h3>Identity, lease, and supporting records</h3>
 							</div>
+							<span class="count">{selectedDocuments.length}</span>
 						</div>
-						{#if !selectedTenancies.length}<p class="muted">No leases linked yet.</p>{:else}<div
-								class="table-list"
-							>
-								{#each selectedTenancies as tenancy (tenancy.id)}<div class="table-row compact-row">
-										<span
-											><strong
-												>{propertyName(tenancy.space_id)} · {spaceName(tenancy.space_id)}</strong
-											><small
-												>{tenancy.start_date} → {tenancy.end_date ?? 'ongoing'} · {money(
-													tenancy.rent_amount
-												)} · {label(tenancy.status)}</small
-											></span
-										>{#if tenancy.status === 'active'}<form
-												method="POST"
-												action="?/endTenancy"
-												class="inline-form"
+						{#if !selectedDocuments.length}
+							<p class="muted">
+								No documents are attached to this tenant yet. Upload an ID, lease, or supporting
+								record from Documents.
+							</p>
+						{:else}
+							<div class="profile-document-list">
+								{#each selectedDocuments as document (document.id)}
+									<div class="profile-document-row">
+										<span class="file-icon" aria-hidden="true">↗</span>
+										<div>
+											<strong>{document.file_name}</strong>
+											<small
+												>{label(document.document_type)} · {document.approval_status} · {document.expires_on ??
+													'No expiry'}</small
 											>
-												<input type="hidden" name="tenancy_id" value={tenancy.id} /><input
-													name="move_out_date"
-													type="date"
-													required
-												/><input name="reason" placeholder="Reason (optional)" /><button
-													class="danger"
-													type="submit">End tenancy</button
-												>
-											</form>{/if}
-									</div>{/each}
-							</div>{/if}
-					</section>
-					<section class="panel">
-						<div class="panel-heading">
-							<div>
-								<p class="eyebrow">Recent activity</p>
-								<h3>Charges, payments, and maintenance</h3>
+										</div>
+										{#if document.url}
+											<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+											<a class="text-action" href={document.url} target="_blank" rel="noreferrer"
+												>View →</a
+											>
+										{:else}
+											<span class="table-muted">Unavailable</span>
+										{/if}
+									</div>
+								{/each}
 							</div>
-						</div>
-						<div class="activity-list">
-							{#each selectedCharges.slice(0, 5) as charge (charge.id)}<div>
-									<span>Charge</span><strong>{charge.description}</strong><b
-										>{money(outstanding(charge))} open</b
-									>
-								</div>{/each}{#each selectedPayments.slice(0, 5) as payment (payment.id)}<div>
-									<span>Payment</span><strong
-										>{payment.payment_date} · {payment.reference ?? 'Manual payment'}</strong
-									><b>{money(payment.amount)}</b>
-								</div>{/each}{#each selectedMaintenance.slice(0, 5) as request (request.id)}<div>
-									<span>Maintenance</span><strong>{request.title}</strong><b class="status-text"
-										>{label(request.status)}</b
-									>
-								</div>{/each}{#if !selectedCharges.length && !selectedPayments.length && !selectedMaintenance.length}<p
-									class="muted"
-								>
-									No activity recorded yet.
-								</p>{/if}
-						</div>
+						{/if}
 					</section>
+					<div class="profile-records">
+						<section class="panel">
+							<div class="panel-heading">
+								<div>
+									<p class="eyebrow">Lease history</p>
+									<h3>Current and previous leases</h3>
+								</div>
+							</div>
+							{#if !selectedTenancies.length}<p class="muted">No leases linked yet.</p>{:else}<div
+									class="table-list"
+								>
+									{#each selectedTenancies as tenancy (tenancy.id)}<div
+											class="table-row compact-row"
+										>
+											<span
+												><strong
+													>{propertyName(tenancy.space_id)} · {spaceName(tenancy.space_id)}</strong
+												><small
+													>{tenancy.start_date} → {tenancy.end_date ?? 'ongoing'} · {money(
+														tenancy.rent_amount
+													)} · {label(tenancy.status)}</small
+												></span
+											>{#if tenancy.status === 'active'}<form
+													method="POST"
+													action="?/endTenancy"
+													class="inline-form"
+												>
+													<input type="hidden" name="tenancy_id" value={tenancy.id} /><input
+														name="move_out_date"
+														type="date"
+														required
+													/><input name="reason" placeholder="Reason (optional)" /><button
+														class="danger"
+														type="submit">End tenancy</button
+													>
+												</form>{/if}
+										</div>{/each}
+								</div>{/if}
+						</section>
+						<section class="panel">
+							<div class="panel-heading">
+								<div>
+									<p class="eyebrow">Recent activity</p>
+									<h3>Charges, payments, and maintenance</h3>
+								</div>
+							</div>
+							<div class="activity-list">
+								{#each selectedCharges.slice(0, 5) as charge (charge.id)}<div>
+										<span>Charge</span><strong>{charge.description}</strong><b
+											>{money(outstanding(charge))} open</b
+										>
+									</div>{/each}{#each selectedPayments.slice(0, 5) as payment (payment.id)}<div>
+										<span>Payment</span><strong
+											>{payment.payment_date} · {payment.reference ?? 'Manual payment'}</strong
+										><b>{money(payment.amount)}</b>
+									</div>{/each}{#each selectedMaintenance.slice(0, 5) as request (request.id)}<div>
+										<span>Maintenance</span><strong>{request.title}</strong><b class="status-text"
+											>{label(request.status)}</b
+										>
+									</div>{/each}{#if !selectedCharges.length && !selectedPayments.length && !selectedMaintenance.length}<p
+										class="muted"
+									>
+										No activity recorded yet.
+									</p>{/if}
+							</div>
+						</section>
+					</div>
 				</section>{/if}
 		</div>
 	{:else if active === 'leases'}
@@ -825,7 +941,12 @@
 								>Other</option
 							></select
 						></label
-					><label>Expiry date<input name="expires_on" type="date" /></label><label
+					><label
+						>Expiry date <small class="optional">Optional</small><input
+							name="expires_on"
+							type="date"
+						/></label
+					><label
 						>File<input
 							name="file"
 							type="file"
@@ -932,6 +1053,17 @@
 	.page-heading p {
 		max-width: 700px;
 	}
+	.page-heading > .primary {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		align-self: center;
+		flex: 0 0 auto;
+		white-space: nowrap;
+		padding: 10px 14px;
+		font-size: 13px;
+		line-height: 1;
+	}
 	.eyebrow {
 		color: #6b8e7e;
 		font-size: 11px;
@@ -964,6 +1096,9 @@
 	.primary span {
 		color: var(--musha-lime);
 		margin-left: 12px;
+	}
+	.page-heading > .primary span {
+		margin-left: 0;
 	}
 	.secondary {
 		display: inline-block;
@@ -1015,7 +1150,6 @@
 	.metric span,
 	.metric small,
 	.table-row small,
-	.person-card small,
 	.document-row small,
 	.lease-card small,
 	.activity-list span,
@@ -1170,7 +1304,6 @@
 		grid-template-columns: 1fr auto;
 	}
 	.table-row strong,
-	.person-card strong,
 	.document-row strong,
 	.lease-card strong {
 		color: var(--musha-ink);
@@ -1295,8 +1428,147 @@
 		grid-template-columns: minmax(270px, 0.72fr) 1.5fr;
 		align-items: start;
 	}
+	.tenant-view {
+		display: grid;
+		gap: 18px;
+	}
+	.tenant-table-panel {
+		padding: 22px;
+	}
+	.tenant-table-wrap {
+		overflow-x: auto;
+	}
+	.tenant-table {
+		width: 100%;
+		min-width: 780px;
+		border-collapse: collapse;
+		table-layout: fixed;
+	}
+	.tenant-table th {
+		padding: 0 12px 11px;
+		color: #78978b;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.1em;
+		text-align: left;
+		text-transform: uppercase;
+	}
+	.tenant-table th:nth-child(1) {
+		width: 23%;
+	}
+	.tenant-table th:nth-child(2) {
+		width: 22%;
+	}
+	.tenant-table th:nth-child(3) {
+		width: 17%;
+	}
+	.tenant-table th:nth-child(4) {
+		width: 13%;
+	}
+	.tenant-table th:nth-child(5) {
+		width: 12%;
+	}
+	.tenant-table th:last-child {
+		width: 13%;
+	}
+	.tenant-table td {
+		border-top: 1px solid #e5eee5;
+		padding: 13px 12px;
+		color: #527867;
+		font-size: 12px;
+		overflow: hidden;
+		vertical-align: middle;
+	}
+	.tenant-table td strong,
+	.tenant-table td small {
+		display: block;
+	}
+	.tenant-table td strong {
+		color: var(--musha-ink);
+		font-size: 13px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.tenant-table td small {
+		margin-top: 4px;
+		color: #78978b;
+		font-size: 11px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.tenant-cell {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		min-width: 0;
+	}
+	.tenant-cell > span:last-child {
+		min-width: 0;
+	}
+	.occupancy-pill {
+		display: inline-flex;
+		border-radius: 999px;
+		background: #f0f6e6;
+		color: #5c8455;
+		padding: 6px 8px;
+		font-size: 10px;
+		font-weight: 800;
+		white-space: nowrap;
+	}
+	.table-muted {
+		color: #91a49a;
+	}
+	.table-action {
+		text-align: right;
+	}
+	.view-button,
+	.back-to-table {
+		display: inline-flex;
+		align-items: center;
+		border: 1px solid #bed5c3;
+		border-radius: 7px;
+		background: #f5faef;
+		color: #33745d;
+		cursor: pointer;
+		font: inherit;
+		font-size: 11px;
+		font-weight: 800;
+		text-decoration: none;
+	}
+	.view-button {
+		padding: 8px 10px;
+		white-space: nowrap;
+	}
+	.view-button span {
+		margin-left: 5px;
+		color: #6eae35;
+	}
+	.view-button:hover,
+	.back-to-table:hover {
+		border-color: #88bb68;
+		background: #edf7df;
+	}
+	.back-to-table {
+		justify-self: start;
+		padding: 8px 11px;
+	}
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
 	.profile-list {
 		padding: 20px;
+		position: sticky;
+		top: 18px;
 	}
 	.person-card {
 		display: grid;
@@ -1315,17 +1587,64 @@
 		border-color: #88bb68;
 		background: #f5faed;
 	}
-	.person-card span:nth-child(2) {
+	.profile-detail {
+		display: grid;
+		gap: 14px;
 		min-width: 0;
 	}
-	.person-card small {
+	.profile-summary,
+	.profile-records {
+		display: grid;
+		gap: 14px;
+		align-items: start;
+		min-width: 0;
+	}
+	.profile-summary {
+		grid-template-columns: minmax(0, 1.25fr) minmax(250px, 0.75fr);
+	}
+	.profile-records {
+		grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+	}
+	.profile-summary > .panel,
+	.profile-records > .panel {
+		min-width: 0;
+		box-sizing: border-box;
+	}
+	.profile-documents {
+		min-width: 0;
+	}
+	.profile-document-list {
+		display: grid;
+		gap: 0;
+	}
+	.profile-document-row {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 12px;
+		padding: 12px 0;
+		border-top: 1px solid #e8f0e8;
+	}
+	.profile-document-row strong,
+	.profile-document-row small {
+		display: block;
+	}
+	.profile-document-row strong {
+		color: var(--musha-ink);
+		font-size: 13px;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
-	.profile-detail {
-		display: grid;
-		gap: 14px;
+	.profile-document-row small {
+		margin-top: 4px;
+		color: #76968a;
+		font-size: 11px;
+	}
+	.optional {
+		color: #89a096;
+		font-size: 11px;
+		font-weight: 500;
 	}
 	.profile-hero {
 		display: flex;
@@ -1382,6 +1701,25 @@
 	.inline-form input {
 		width: auto;
 		min-width: 130px;
+	}
+	.profile-records .table-row.compact-row {
+		grid-template-columns: 1fr;
+		align-items: start;
+	}
+	.profile-records .inline-form {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		justify-content: stretch;
+		width: 100%;
+	}
+	.profile-records .inline-form input,
+	.profile-records .inline-form button {
+		box-sizing: border-box;
+		min-width: 0;
+		width: 100%;
+	}
+	.profile-records .inline-form button {
+		grid-column: 1 / -1;
 	}
 	.danger {
 		border: 0;
@@ -1497,6 +1835,9 @@
 		.profile-layout {
 			grid-template-columns: 1fr;
 		}
+		.profile-list {
+			position: static;
+		}
 		.form-grid.four {
 			grid-template-columns: repeat(2, 1fr);
 		}
@@ -1506,10 +1847,17 @@
 			align-items: start;
 			flex-direction: column;
 		}
+		.page-heading > .primary {
+			align-self: start;
+		}
 		.metric-row,
 		.form-grid.two,
 		.form-grid.four,
 		.performance-grid {
+			grid-template-columns: 1fr;
+		}
+		.profile-summary,
+		.profile-records {
 			grid-template-columns: 1fr;
 		}
 		.page-heading h1 {
@@ -1532,6 +1880,14 @@
 		}
 		.document-row {
 			grid-template-columns: auto 1fr;
+		}
+		.profile-document-row {
+			grid-template-columns: auto minmax(0, 1fr);
+		}
+		.profile-document-row .text-action,
+		.profile-document-row .table-muted {
+			grid-column: 2;
+			justify-self: start;
 		}
 		.approval-form,
 		.document-row .text-action {

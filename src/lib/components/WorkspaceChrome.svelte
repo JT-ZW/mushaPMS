@@ -231,7 +231,9 @@
 		opacity: 0.82;
 	}
 	@media (max-width: 760px) {
-		.workspace-shell { display: block; }
+		.workspace-shell {
+			display: block;
+		}
 		.support-banner {
 			display: block;
 		}
@@ -276,9 +278,23 @@
 		}
 	}
 	@media (max-width: 760px) {
-		.workspace-sidebar nav { display: flex; overflow-x: auto; gap: 5px; padding-bottom: 10px; scrollbar-width: none; }
-		.workspace-sidebar nav::-webkit-scrollbar { display: none; }
-		.workspace-sidebar nav a { white-space: nowrap; padding: 10px 12px; font-size: 12px; }
-		.workspace-sidebar nav a::before { display: none; }
+		.workspace-sidebar nav {
+			display: flex;
+			overflow-x: auto;
+			gap: 5px;
+			padding-bottom: 10px;
+			scrollbar-width: none;
+		}
+		.workspace-sidebar nav::-webkit-scrollbar {
+			display: none;
+		}
+		.workspace-sidebar nav a {
+			white-space: nowrap;
+			padding: 10px 12px;
+			font-size: 12px;
+		}
+		.workspace-sidebar nav a::before {
+			display: none;
+		}
 	}
 </style>

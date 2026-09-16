@@ -62,7 +62,7 @@ export const load = async ({ locals, params }) => {
 				.select('id, action, entity_type, metadata, created_at')
 				.eq('organization_id', params.id)
 				.order('created_at', { ascending: false })
-				.limit(8),
+				.limit(5),
 			locals.supabase
 				.from('organization_members')
 				.select('user_id', { count: 'exact', head: true })

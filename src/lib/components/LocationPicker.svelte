@@ -88,10 +88,9 @@
 		void (async () => {
 			const L = await import('leaflet');
 			map = L.map(mapElement, { scrollWheelZoom: false, preferCanvas: true }).setView(harare, 6);
-			L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-				attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-				maxZoom: 20,
-				detectRetina: true
+			L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+				attribution: '&copy; OpenStreetMap contributors',
+				maxZoom: 20
 			}).addTo(map);
 			const existingLat = Number(latitude);
 			const existingLng = Number(longitude);

@@ -274,8 +274,10 @@ export const actions = {
 				mime_type: file.type,
 				file_size: file.size
 			});
-			if (attachment.error)
+			if (attachment.error) {
 				await locals.supabase.storage.from('maintenance-attachments').remove([storagePath]);
+				return fail(400, { message: attachment.error.message });
+			}
 		}
 		return { success: true, message: 'Maintenance request submitted.' };
 	},

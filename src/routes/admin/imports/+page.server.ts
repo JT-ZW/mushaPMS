@@ -51,6 +51,12 @@ const normalize = (headers: string[], row: string[]) =>
 	Object.fromEntries(
 		headers.map((header, index) => [header.trim().toLowerCase(), row[index]?.trim() ?? ''])
 	);
+const safeFileName = (name: string) =>
+	name
+		.toLowerCase()
+		.replace(/[^a-z0-9._-]+/g, '-')
+		.replace(/^-+|-+$/g, '')
+		.slice(0, 100) || 'import.csv';
 const validateRow = (entity: ImportEntity, raw: Record<string, string>) => {
 	const errors = requiredFields[entity]
 		.filter((field) => !raw[field])
@@ -106,6 +112,11 @@ export const actions = {
 			return fail(400, { message: 'Choose an organization, data type, and CSV file.' });
 		if (file.size > 5 * 1024 * 1024)
 			return fail(400, { message: 'CSV files must be 5 MB or smaller.' });
+		if (
+			!['text/csv', 'application/csv', 'application/vnd.ms-excel'].includes(file.type) &&
+			!file.name.toLowerCase().endsWith('.csv')
+		)
+			return fail(400, { message: 'Only CSV files are supported.' });
 		const rows = csvRows(await file.text());
 		if (rows.length < 2)
 			return fail(400, { message: 'The CSV needs a header row and at least one data row.' });
@@ -139,16 +150,23 @@ export const actions = {
 			.single();
 		if (jobError || !job)
 			return fail(400, { message: jobError?.message ?? 'Import job could not be created.' });
-		await locals.supabase.storage
-			.from('imports')
-			.upload(`${organizationId}/${job.id}-${file.name}`, file, {
-				contentType: 'text/csv',
-				upsert: false
-			});
+		const storagePath = `${organizationId}/${job.id}-${safeFileName(file.name)}`;
+		const upload = await locals.supabase.storage.from('imports').upload(storagePath, file, {
+			contentType: 'text/csv',
+			upsert: false
+		});
+		if (upload.error) {
+			await locals.supabase
+				.from('import_jobs')
+				.update({ status: 'failed', error_summary: upload.error.message })
+				.eq('id', job.id);
+			return fail(400, { message: `CSV could not be stored: ${upload.error.message}` });
+		}
 		const { error: rowsError } = await locals.supabase
 			.from('import_rows')
 			.insert(prepared.map((row) => ({ ...row, import_job_id: job.id })));
 		if (rowsError) {
+			await locals.supabase.storage.from('imports').remove([storagePath]);
 			await locals.supabase
 				.from('import_jobs')
 				.update({ status: 'failed', error_summary: rowsError.message })

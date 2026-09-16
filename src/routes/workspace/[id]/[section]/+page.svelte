@@ -254,7 +254,7 @@
 			spaces={data.spaces}
 		/>
 	{:else if data.sectionKey === 'people' || data.sectionKey === 'tenants' || data.sectionKey === 'new-tenant' || data.sectionKey === 'leases' || data.sectionKey === 'documents' || data.sectionKey === 'move-outs'}
-		<PeopleLeasesWorkspace {data} active={data.sectionKey} {form} />
+		<PeopleLeasesWorkspace {data} active={data.sectionKey} profileId={data.profileId} {form} />
 		<div class="legacy-people">
 			<div class="section-grid">
 				<section class="panel form-panel">
@@ -450,7 +450,12 @@
 							></select
 						></label
 					>
-					<label>Expiry date<input name="expires_on" type="date" /></label>
+					<label
+						>Expiry date <small class="optional">Optional</small><input
+							name="expires_on"
+							type="date"
+						/></label
+					>
 					<label
 						>File<input
 							name="file"

@@ -309,13 +309,41 @@
 		}
 	}
 	@media (max-width: 760px) {
-		.admin-shell { display: block; }
-		.sidebar { position: sticky; z-index: 10; width: 100%; height: auto; padding: 10px 16px 0; }
-		.sidebar .brand, .sidebar-foot { display: none; }
-		.sidebar .nav-label { display: none; }
-		.sidebar nav { display: flex; overflow-x: auto; gap: 5px; padding-bottom: 10px; scrollbar-width: none; }
-		.sidebar nav::-webkit-scrollbar { display: none; }
-		.sidebar nav a { white-space: nowrap; justify-content: flex-start; gap: 7px; padding: 10px 12px; }
-		.sidebar .nav-text { font-size: 12px; }
+		.admin-shell {
+			display: block;
+		}
+		.sidebar {
+			position: sticky;
+			z-index: 10;
+			width: 100%;
+			height: auto;
+			padding: 10px 16px 0;
+		}
+		.sidebar .brand,
+		.sidebar-foot {
+			display: none;
+		}
+		.sidebar .nav-label {
+			display: none;
+		}
+		.sidebar nav {
+			display: flex;
+			overflow-x: auto;
+			gap: 5px;
+			padding-bottom: 10px;
+			scrollbar-width: none;
+		}
+		.sidebar nav::-webkit-scrollbar {
+			display: none;
+		}
+		.sidebar nav a {
+			white-space: nowrap;
+			justify-content: flex-start;
+			gap: 7px;
+			padding: 10px 12px;
+		}
+		.sidebar .nav-text {
+			font-size: 12px;
+		}
 	}
 </style>

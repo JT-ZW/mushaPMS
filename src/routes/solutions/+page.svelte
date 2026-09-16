@@ -1,14 +1,318 @@
 <script lang="ts">
-	import MarketingHeader from '$lib/components/MarketingHeader.svelte'; import MarketingFooter from '$lib/components/MarketingFooter.svelte'; import { applicationHref } from '$lib/marketing';
-	const modules=[
-		['⌂','Properties & spaces','Build a dependable portfolio register.','Register properties, addresses and rental models|Organize buildings, units, rooms and spaces|Track occupancy and availability at a glance','leaf'],
-		['◌','People & leases','Keep every tenancy relationship in context.','Manage tenants, owners, vendors and teams|Capture leases, moves, renewals and documents|See who lives where and what needs attention','mist'],
-		['$','Finance & collections','Make rent operations visible and accountable.','Create recurring rent charges and invoices|Record payments and allocate them accurately|Follow arrears, expenses and collection actions','sand'],
-		['⌁','Maintenance operations','Move requests from report to resolution.','Log work against the right property and space|Assign vendors and track request progress|Use attachments, due dates and preventive plans','teal'],
-		['↗','Reports & tenant portal','Give every stakeholder a clearer picture.','Review occupancy, collections and operations|Share relevant documents with tenants|Keep useful portfolio information close at hand','sky'],
-		['⚙','Setup & operating controls','Shape Musha around how your organization runs.','Configure organization details and modules|Set invoice, notice and notification defaults|Bring teams in with role-aware access','clay']
+	import MarketingHeader from '$lib/components/MarketingHeader.svelte';
+	import MarketingFooter from '$lib/components/MarketingFooter.svelte';
+	import { applicationHref } from '$lib/marketing';
+	const modules = [
+		[
+			'⌂',
+			'Properties & spaces',
+			'Build a dependable portfolio register.',
+			'Register properties, addresses and rental models|Organize buildings, units, rooms and spaces|Track occupancy and availability at a glance',
+			'leaf'
+		],
+		[
+			'◌',
+			'People & leases',
+			'Keep every tenancy relationship in context.',
+			'Manage tenants, owners, vendors and teams|Capture leases, moves, renewals and documents|See who lives where and what needs attention',
+			'mist'
+		],
+		[
+			'$',
+			'Finance & collections',
+			'Make rent operations visible and accountable.',
+			'Create recurring rent charges and invoices|Record payments and allocate them accurately|Follow arrears, expenses and collection actions',
+			'sand'
+		],
+		[
+			'⌁',
+			'Maintenance operations',
+			'Move requests from report to resolution.',
+			'Log work against the right property and space|Assign vendors and track request progress|Use attachments, due dates and preventive plans',
+			'teal'
+		],
+		[
+			'↗',
+			'Reports & tenant portal',
+			'Give every stakeholder a clearer picture.',
+			'Review occupancy, collections and operations|Share relevant documents with tenants|Keep useful portfolio information close at hand',
+			'sky'
+		],
+		[
+			'⚙',
+			'Setup & operating controls',
+			'Shape Musha around how your organization runs.',
+			'Configure organization details and modules|Set invoice, notice and notification defaults|Bring teams in with role-aware access',
+			'clay'
+		]
 	];
 </script>
+
 <svelte:head><title>Solutions · Musha PMS</title></svelte:head><MarketingHeader />
-<main><section class="hero"><p>CONNECTED PROPERTY OPERATIONS</p><h1>The modules behind<br />a better <em>Musha.</em></h1><span>Each part of Musha handles a real job in the property day—connected to the rest, so your team can run the whole picture with less chasing.</span></section><section class="intro"><p>WHAT IS AVAILABLE IN MUSHA</p><h2>One operating layer.<br /><em>Six essential workspaces.</em></h2><span>Start with the parts your team needs today, then give each new property and person the context they need to work together.</span></section><section class="modules">{#each modules as module,i}<article class={module[4]}><div><small>0{i+1}</small><i>{module[0]}</i></div><h3>{module[1]}</h3><p>{module[2]}</p><ul>{#each module[3].split('|') as item}<li>{item}</li>{/each}</ul><a href={applicationHref()}>See it in your workspace →</a></article>{/each}</section><section class="flow"><div><p>HOW IT WORKS TOGETHER</p><h2>From property<br />to <em>possibility.</em></h2></div><div>{#each [['1','Set the foundation','Register the property, spaces, people and tenancy.'],['2','Run the day','Collect rent, respond to maintenance and keep communication in context.'],['3','See what is next','Use reports and portfolio data to make the next good decision.']] as step}<article><i>{step[0]}</i><span><b>{step[1]}</b><small>{step[2]}</small></span></article>{/each}</div></section><section class="cta"><div><p>SEE THE FULL PICTURE</p><h2>Ready to explore<br /><em>your Musha?</em></h2></div><a href={applicationHref()}>Sign in to Musha →</a></section></main><MarketingFooter />
-<style>:global(body){margin:0;background:#fbfaf7;color:#123d35;font-family:var(--font-body)}.hero{padding:105px clamp(24px,11vw,210px) 88px;background:radial-gradient(circle at 83% 20%,#f7d19d,transparent 22%),linear-gradient(135deg,#f2f5ed,#fbf7f0)}.hero p,.intro>p,.flow p,.cta p{color:#5c866f;font-size:10px;font-weight:800;letter-spacing:.17em}.hero h1,.intro h2,.flow h2,.cta h2{margin:20px 0;font-size:clamp(49px,6.7vw,91px);line-height:.88;letter-spacing:-.09em}em{color:#27846a;font-style:normal}.hero span,.intro span{display:block;max-width:570px;color:#6c8178;font-size:16px;line-height:1.7}.intro{padding:96px clamp(24px,11vw,210px) 43px}.intro h2,.flow h2{font-size:clamp(41px,5vw,67px)}.modules{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:0 clamp(24px,7vw,106px) 110px}.modules article{min-height:355px;padding:25px;border-radius:14px;background:#e8f0e1}.modules article.mist{background:#e2ece6}.modules article.sand{background:#f3dbc0}.modules article.teal{background:#d8e9df}.modules article.sky{background:#e3eaed}.modules article.clay{background:#ead8c7}.modules article>div{display:flex;justify-content:space-between}.modules small{color:#698b79;font-size:10px;font-weight:800}.modules i{display:grid;place-items:center;width:42px;height:42px;border-radius:10px;background:#fff9;color:#477b60;font-size:21px;font-style:normal}.modules h3{margin:43px 0 9px;font-size:28px;letter-spacing:-.07em}.modules p{margin:0;color:#678075;font-size:14px;line-height:1.65}.modules ul{display:grid;gap:7px;margin:21px 0 0;padding:0;list-style:none}.modules li{color:#517161;font-size:11px}.modules li:before{content:'✓';margin-right:8px;color:#47815f}.modules a{display:inline-block;margin-top:24px;color:#39725a;font-size:11px;font-weight:800;text-decoration:none}.flow{display:grid;grid-template-columns:.8fr 1.2fr;gap:clamp(42px,9vw,145px);align-items:center;padding:100px clamp(24px,11vw,210px);background:#eff4e8}.flow article{display:flex;align-items:center;gap:15px;padding:14px;border-bottom:1px solid #ccdfcb}.flow i{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#a9d777;color:#245a49;font-size:11px;font-style:normal;font-weight:800}.flow b,.flow small{display:block}.flow b{font-size:14px}.flow small{margin-top:4px;color:#71877d;font-size:11px}.cta{display:flex;align-items:end;justify-content:space-between;padding:92px clamp(24px,11vw,210px);background:#104e44}.cta h2{color:#fff;font-size:clamp(43px,5vw,70px)}.cta a{padding:15px 17px;border-radius:8px;background:#a9dc72;color:#174b40;font-size:13px;font-weight:700;text-decoration:none}@media(max-width:700px){.hero,.intro{padding-left:24px;padding-right:24px}.modules{grid-template-columns:1fr;padding:0 20px 70px}.flow{grid-template-columns:1fr;padding:70px 24px}.cta{display:block;padding:70px 24px}.cta a{display:inline-block;margin-top:23px}}</style>
+<main>
+	<section class="hero">
+		<p>CONNECTED PROPERTY OPERATIONS</p>
+		<h1>The modules behind<br />a better <em>Musha.</em></h1>
+		<span
+			>Each part of Musha handles a real job in the property day—connected to the rest, so your team
+			can run the whole picture with less chasing.</span
+		>
+	</section>
+	<section class="intro">
+		<p>WHAT IS AVAILABLE IN MUSHA</p>
+		<h2>One operating layer.<br /><em>Six essential workspaces.</em></h2>
+		<span
+			>Start with the parts your team needs today, then give each new property and person the
+			context they need to work together.</span
+		>
+	</section>
+	<section class="modules">
+		{#each modules as module, i (module[1])}<article class={module[4]}>
+				<div><small>0{i + 1}</small><i>{module[0]}</i></div>
+				<h3>{module[1]}</h3>
+				<p>{module[2]}</p>
+				<ul>
+					{#each module[3].split('|') as item (item)}<li>{item}</li>{/each}
+				</ul>
+				<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+				<a href={applicationHref()}>See it in your workspace →</a>
+			</article>{/each}
+	</section>
+	<section class="flow">
+		<div>
+			<p>HOW IT WORKS TOGETHER</p>
+			<h2>From property<br />to <em>possibility.</em></h2>
+		</div>
+		<div>
+			{#each [['1', 'Set the foundation', 'Register the property, spaces, people and tenancy.'], ['2', 'Run the day', 'Collect rent, respond to maintenance and keep communication in context.'], ['3', 'See what is next', 'Use reports and portfolio data to make the next good decision.']] as step (step[0])}<article
+				>
+					<i>{step[0]}</i><span><b>{step[1]}</b><small>{step[2]}</small></span>
+				</article>{/each}
+		</div>
+	</section>
+	<section class="cta">
+		<div>
+			<p>SEE THE FULL PICTURE</p>
+			<h2>Ready to explore<br /><em>your Musha?</em></h2>
+		</div>
+		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+		<a href={applicationHref()}>Sign in to Musha →</a>
+	</section>
+</main>
+<MarketingFooter />
+
+<style>
+	:global(body) {
+		margin: 0;
+		background: #fbfaf7;
+		color: #123d35;
+		font-family: var(--font-body);
+	}
+	.hero {
+		padding: 105px clamp(24px, 11vw, 210px) 88px;
+		background:
+			radial-gradient(circle at 83% 20%, #f7d19d, transparent 22%),
+			linear-gradient(135deg, #f2f5ed, #fbf7f0);
+	}
+	.hero p,
+	.intro > p,
+	.flow p,
+	.cta p {
+		color: #5c866f;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.17em;
+	}
+	.hero h1,
+	.intro h2,
+	.flow h2,
+	.cta h2 {
+		margin: 20px 0;
+		font-size: clamp(49px, 6.7vw, 91px);
+		line-height: 0.88;
+		letter-spacing: -0.09em;
+	}
+	em {
+		color: #27846a;
+		font-style: normal;
+	}
+	.hero span,
+	.intro span {
+		display: block;
+		max-width: 570px;
+		color: #6c8178;
+		font-size: 16px;
+		line-height: 1.7;
+	}
+	.intro {
+		padding: 96px clamp(24px, 11vw, 210px) 43px;
+	}
+	.intro h2,
+	.flow h2 {
+		font-size: clamp(41px, 5vw, 67px);
+	}
+	.modules {
+		display: grid;
+		grid-template-columns: repeat(2, 1fr);
+		gap: 10px;
+		padding: 0 clamp(24px, 7vw, 106px) 110px;
+	}
+	.modules article {
+		min-height: 355px;
+		padding: 25px;
+		border-radius: 14px;
+		background: #e8f0e1;
+	}
+	.modules article.mist {
+		background: #e2ece6;
+	}
+	.modules article.sand {
+		background: #f3dbc0;
+	}
+	.modules article.teal {
+		background: #d8e9df;
+	}
+	.modules article.sky {
+		background: #e3eaed;
+	}
+	.modules article.clay {
+		background: #ead8c7;
+	}
+	.modules article > div {
+		display: flex;
+		justify-content: space-between;
+	}
+	.modules small {
+		color: #698b79;
+		font-size: 10px;
+		font-weight: 800;
+	}
+	.modules i {
+		display: grid;
+		place-items: center;
+		width: 42px;
+		height: 42px;
+		border-radius: 10px;
+		background: #fff9;
+		color: #477b60;
+		font-size: 21px;
+		font-style: normal;
+	}
+	.modules h3 {
+		margin: 43px 0 9px;
+		font-size: 28px;
+		letter-spacing: -0.07em;
+	}
+	.modules p {
+		margin: 0;
+		color: #678075;
+		font-size: 14px;
+		line-height: 1.65;
+	}
+	.modules ul {
+		display: grid;
+		gap: 7px;
+		margin: 21px 0 0;
+		padding: 0;
+		list-style: none;
+	}
+	.modules li {
+		color: #517161;
+		font-size: 11px;
+	}
+	.modules li:before {
+		content: '✓';
+		margin-right: 8px;
+		color: #47815f;
+	}
+	.modules a {
+		display: inline-block;
+		margin-top: 24px;
+		color: #39725a;
+		font-size: 11px;
+		font-weight: 800;
+		text-decoration: none;
+	}
+	.flow {
+		display: grid;
+		grid-template-columns: 0.8fr 1.2fr;
+		gap: clamp(42px, 9vw, 145px);
+		align-items: center;
+		padding: 100px clamp(24px, 11vw, 210px);
+		background: #eff4e8;
+	}
+	.flow article {
+		display: flex;
+		align-items: center;
+		gap: 15px;
+		padding: 14px;
+		border-bottom: 1px solid #ccdfcb;
+	}
+	.flow i {
+		display: grid;
+		place-items: center;
+		width: 30px;
+		height: 30px;
+		border-radius: 50%;
+		background: #a9d777;
+		color: #245a49;
+		font-size: 11px;
+		font-style: normal;
+		font-weight: 800;
+	}
+	.flow b,
+	.flow small {
+		display: block;
+	}
+	.flow b {
+		font-size: 14px;
+	}
+	.flow small {
+		margin-top: 4px;
+		color: #71877d;
+		font-size: 11px;
+	}
+	.cta {
+		display: flex;
+		align-items: end;
+		justify-content: space-between;
+		padding: 92px clamp(24px, 11vw, 210px);
+		background: #104e44;
+	}
+	.cta h2 {
+		color: #fff;
+		font-size: clamp(43px, 5vw, 70px);
+	}
+	.cta a {
+		padding: 15px 17px;
+		border-radius: 8px;
+		background: #a9dc72;
+		color: #174b40;
+		font-size: 13px;
+		font-weight: 700;
+		text-decoration: none;
+	}
+	@media (max-width: 700px) {
+		.hero,
+		.intro {
+			padding-left: 24px;
+			padding-right: 24px;
+		}
+		.modules {
+			grid-template-columns: 1fr;
+			padding: 0 20px 70px;
+		}
+		.flow {
+			grid-template-columns: 1fr;
+			padding: 70px 24px;
+		}
+		.cta {
+			display: block;
+			padding: 70px 24px;
+		}
+		.cta a {
+			display: inline-block;
+			margin-top: 23px;
+		}
+	}
+</style>

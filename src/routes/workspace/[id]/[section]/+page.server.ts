@@ -151,7 +151,7 @@ const getMaintenanceAccess = async (locals: App.Locals, organizationId: string) 
 		: null;
 };
 
-export const load = async ({ locals, params }) => {
+export const load = async ({ locals, params, url }) => {
 	const access = await getWorkspaceAccess(locals, params.id);
 	if (!access) {
 		const { user } = await locals.safeGetSession();
@@ -345,10 +345,20 @@ export const load = async ({ locals, params }) => {
 	const signedDocumentByPath = new Map(
 		(signedDocuments.data ?? []).map((item) => [item.path, item.signedUrl])
 	);
+	const requestedProfileId = url.searchParams.get('person');
+	const profileId =
+		params.section === 'tenants' &&
+		requestedProfileId &&
+		(people.data ?? []).some(
+			(person) => person.id === requestedProfileId && person.person_type === 'tenant'
+		)
+			? requestedProfileId
+			: null;
 
 	return {
 		...access,
 		sectionKey: params.section,
+		profileId,
 		section,
 		properties: properties.data ?? [],
 		spaces: spaces.data ?? [],
@@ -1419,8 +1429,11 @@ export const actions = {
 		const form = await request.formData();
 		const file = form.get('file');
 		const personId = value(form, 'person_id');
+		const expiresOn = value(form, 'expires_on');
 		if (!(file instanceof File) || file.size === 0 || !personId)
 			return fail(400, { message: 'Choose a tenant and a document.' });
+		if (expiresOn && !/^\d{4}-\d{2}-\d{2}$/.test(expiresOn))
+			return fail(400, { message: 'Expiry date must be a valid date or left blank.' });
 		if (file.size > 10 * 1024 * 1024)
 			return fail(400, { message: 'Documents must be 10 MB or smaller.' });
 		if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(file.type))
@@ -1446,7 +1459,7 @@ export const actions = {
 			storage_path: storagePath,
 			mime_type: file.type,
 			file_size: file.size,
-			expires_on: value(form, 'expires_on') || null,
+			expires_on: expiresOn || null,
 			approval_status: 'approved',
 			approved_by: access.user.id,
 			approved_at: new Date().toISOString(),
@@ -1983,7 +1996,10 @@ export const actions = {
 				timezone: value(form, 'timezone') || 'Africa/Harare'
 			})
 			.eq('id', params.id);
-		if (updateError) return fail(400, { message: updateError.message });
+		if (updateError) {
+			if (logoPath) await locals.supabase.storage.from('organization-assets').remove([logoPath]);
+			return fail(400, { message: updateError.message });
+		}
 		const { error: preferencesError } = await locals.supabase
 			.from('organization_workspace_settings')
 			.upsert(
@@ -2010,7 +2026,10 @@ export const actions = {
 				},
 				{ onConflict: 'organization_id' }
 			);
-		if (preferencesError) return fail(400, { message: preferencesError.message });
+		if (preferencesError) {
+			if (logoPath) await locals.supabase.storage.from('organization-assets').remove([logoPath]);
+			return fail(400, { message: preferencesError.message });
+		}
 		await writeAuditLog(locals, {
 			actorUserId: access.user.id,
 			organizationId: params.id,

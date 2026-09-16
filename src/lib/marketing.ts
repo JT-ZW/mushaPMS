@@ -9,4 +9,5 @@ export function applicationHref(path = '/login') {
 
 export const contactEmail = 'jeffmuruh@gmail.com';
 export const contactPhone = '+263786303048';
-export const whatsappHref = 'https://wa.me/263786303048?text=Hello%20Jeffrey%2C%20I%20would%20like%20to%20join%20the%20Musha%20beta.';
+export const whatsappHref =
+	'https://wa.me/263786303048?text=Hello%20Jeffrey%2C%20I%20would%20like%20to%20join%20the%20Musha%20beta.';

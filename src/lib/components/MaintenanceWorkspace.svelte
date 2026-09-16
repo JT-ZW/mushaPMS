@@ -378,7 +378,7 @@
 								placeholder="What happened, when it was noticed, access notes, and any safety concern"
 							></textarea></label
 						>
-						<div class="form-grid three">
+						<div class="form-grid three schedule-fields">
 							<label>Schedule for<input name="scheduled_for" type="date" /></label><label
 								>Service target<input name="sla_due_at" type="datetime-local" /></label
 							><label
@@ -1320,6 +1320,19 @@
 	.form-grid.three {
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 	}
+	.schedule-fields > label {
+		min-width: 0;
+	}
+	.schedule-fields input {
+		min-width: 0;
+		max-width: 100%;
+	}
+	.schedule-fields input[type='date'],
+	.schedule-fields input[type='datetime-local'] {
+		font-size: 11px;
+		padding-left: 8px;
+		padding-right: 8px;
+	}
 	label {
 		display: grid;
 		gap: 6px;
@@ -1805,6 +1818,10 @@
 		}
 		.request-edit {
 			grid-template-columns: 1fr;
+		}
+		.request-edit > * {
+			min-width: 0;
+			width: 100%;
 		}
 		.update-preview {
 			align-items: start;
