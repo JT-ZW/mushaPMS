@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import MushaDatePicker from '$lib/components/MushaDatePicker.svelte';
 
 	type Property = { id: string; name: string; city: string | null; country: string | null };
 	type Space = { id: string; property_id: string; name: string; kind: string };
@@ -88,9 +89,12 @@
 	const props = $props<{ data: FinanceData }>();
 	const data = $derived(props.data as FinanceData);
 	let tab = $state('overview');
+	let dueProperty = $state('');
+	let dueStatus = $state('open');
 	const today = new Date().toISOString().slice(0, 10);
 	const tabs = [
 		{ key: 'overview', label: 'Overview' },
+		{ key: 'rent-due', label: 'Rent due' },
 		{ key: 'charges', label: 'Charges & invoices' },
 		{ key: 'payments', label: 'Payments' },
 		{ key: 'expenses', label: 'Expenses' },
@@ -313,6 +317,8 @@
 					</div>{/if}
 			</section>
 		</div>
+	{:else if tab === 'rent-due'}
+		<section class="panel"><div class="panel-heading"><div><p class="eyebrow">Rent calendar</p><h3>Rent due register</h3><p>Track due rent by tenant, property, rented space, amount, and date. Use the payment desk to record receipts and generate receipts.</p></div></div><div class="due-filters"><select bind:value={dueProperty}><option value="">All properties</option>{#each data.properties as property (property.id)}<option value={property.id}>{property.name}</option>{/each}</select><select bind:value={dueStatus}><option value="open">Open balances</option><option value="all">All statuses</option><option value="overdue">Overdue</option><option value="issued">Upcoming</option><option value="paid">Paid</option></select></div><div class="due-table-wrap"><table class="due-table"><thead><tr><th>Tenant</th><th>Property</th><th>Rented space</th><th>Amount due</th><th>Due date</th><th>Status</th><th></th></tr></thead><tbody>{#each activeCharges.filter((charge) => charge.charge_type === 'rent' && (!dueProperty || data.spaces.find((space) => space.id === data.tenancies.find((tenancy) => tenancy.id === charge.tenancy_id)?.space_id)?.property_id === dueProperty) && (dueStatus === 'all' || (dueStatus === 'open' ? !['paid', 'draft'].includes(statusForCharge(charge)) : statusForCharge(charge) === dueStatus)) ) as charge (charge.id)}{@const tenancy = data.tenancies.find((item) => item.id === charge.tenancy_id)}{@const space = data.spaces.find((item) => item.id === tenancy?.space_id)}<tr><td>{tenantName(charge.tenancy_id)}</td><td>{space ? propertyName(space.property_id) : '—'}</td><td>{space?.name ?? '—'}</td><td><strong>{money(outstandingForCharge(charge))}</strong></td><td>{charge.due_on}</td><td><span class={`charge-status ${statusForCharge(charge)}`}>{statusForCharge(charge).replaceAll('_',' ')}</span></td><td><button class="table-action" type="button" onclick={() => (tab = 'payments')}>Record payment →</button></td></tr>{:else}<tr><td colspan="7">No rent charges match the selected filters.</td></tr>{/each}</tbody></table></div></section>
 	{:else if tab === 'charges'}
 		<div class="section-grid">
 			<section class="panel form-panel">
@@ -503,7 +509,7 @@
 								step="0.01"
 								required
 							/></label
-						><label>Payment date<input name="payment_date" type="date" required /></label><label
+						><label>Payment date<MushaDatePicker name="payment_date" required /></label><label
 							>Method<select name="method"
 								><option value="bank_transfer">Bank transfer</option><option value="cash"
 									>Cash</option
@@ -1275,6 +1281,80 @@
 	.records-panel {
 		margin-top: 0;
 	}
+	.due-filters {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 9px;
+		margin: 2px 0 18px;
+	}
+	.due-filters select {
+		background: #f9fbf8;
+		border: 1px solid #dbe8dd;
+		border-radius: 7px;
+		color: #416b58;
+		font: inherit;
+		font-size: 11px;
+		font-weight: 700;
+		min-width: 178px;
+		padding: 9px 30px 9px 11px;
+		width: auto;
+	}
+	.due-table-wrap {
+		border: 1px solid #e3ece5;
+		border-radius: 9px;
+		overflow-x: auto;
+	}
+	.due-table {
+		border-collapse: collapse;
+		min-width: 760px;
+		width: 100%;
+	}
+	.due-table th {
+		background: #f7faf5;
+		border-bottom: 1px solid #e2ebe3;
+		color: #789287;
+		font-size: 10px;
+		letter-spacing: .08em;
+		padding: 12px 14px;
+		text-align: left;
+		text-transform: uppercase;
+	}
+	.due-table td {
+		border-bottom: 1px solid #edf2ed;
+		color: #547365;
+		font-size: 12px;
+		padding: 14px;
+		vertical-align: middle;
+	}
+	.due-table tbody tr:last-child td { border-bottom: 0; }
+	.due-table tbody tr:hover { background: #fbfdf9; }
+	.due-table td strong { color: #244f40; font-size: 12px; }
+	.charge-status {
+		background: #edf4dc;
+		border-radius: 99px;
+		color: #63846a;
+		display: inline-block;
+		font-size: 10px;
+		font-weight: 800;
+		padding: 5px 8px;
+		text-transform: capitalize;
+	}
+	.charge-status.overdue { background: #fbe9e4; color: #a05748; }
+	.charge-status.partially_paid { background: #fff2d8; color: #9a7228; }
+	.charge-status.paid { background: #e3f1e6; color: #438057; }
+	.table-action {
+		background: #edf5d9;
+		border: 0;
+		border-radius: 6px;
+		color: #407557;
+		cursor: pointer;
+		font: inherit;
+		font-size: 11px;
+		font-weight: 800;
+		padding: 8px 10px;
+		white-space: nowrap;
+	}
+	.table-action:hover { background: var(--musha-deep); color: #fff; }
 	@media (max-width: 1120px) {
 		.metric-row {
 			grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1315,6 +1395,7 @@
 		.allocation-form {
 			grid-template-columns: 1fr;
 		}
+		.due-filters select { min-width: 150px; }
 	}
 	@media (max-width: 420px) {
 		.metric-row {

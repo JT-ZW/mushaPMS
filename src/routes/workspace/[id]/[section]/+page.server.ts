@@ -62,6 +62,11 @@ const sections = {
 		eyebrow: 'Work orders',
 		copy: 'Capture issues, assign their progress, and keep a complete record.'
 	},
+	support: {
+		title: 'Support',
+		eyebrow: 'Musha support',
+		copy: 'Send a request to the Musha team and follow its progress here.'
+	},
 	reports: {
 		title: 'Reports',
 		eyebrow: 'Clarity',
@@ -184,7 +189,9 @@ export const load = async ({ locals, params, url }) => {
 		workspaceSettings,
 		invitations,
 		billingDocuments,
-		documents
+		documents,
+		supportTickets,
+		supportTicketAttachments
 	] = await Promise.all([
 		locals.supabase
 			.from('properties')
@@ -318,7 +325,16 @@ export const load = async ({ locals, params, url }) => {
 			)
 			.eq('organization_id', params.id)
 			.order('created_at', { ascending: false })
-			.limit(50)
+			.limit(50),
+		locals.supabase
+			.from('support_tickets')
+			.select('id, subject, description, category, priority, status, created_at, updated_at, resolved_at')
+			.eq('organization_id', params.id)
+			.order('created_at', { ascending: false }),
+		locals.supabase
+			.from('support_ticket_attachments')
+			.select('id, ticket_id, file_name, storage_path, mime_type, file_size, created_at')
+			.order('created_at', { ascending: false })
 	]);
 	const attachmentRows = maintenanceAttachments.data ?? [];
 	const signedAttachments = attachmentRows.length
@@ -344,6 +360,16 @@ export const load = async ({ locals, params, url }) => {
 		: { data: [] };
 	const signedDocumentByPath = new Map(
 		(signedDocuments.data ?? []).map((item) => [item.path, item.signedUrl])
+	);
+	const supportAttachmentRows = supportTicketAttachments.data ?? [];
+	const signedSupportAttachments = supportAttachmentRows.length
+		? await locals.supabase.storage.from('support-ticket-attachments').createSignedUrls(
+				supportAttachmentRows.map((attachment) => attachment.storage_path),
+				3600
+			)
+		: { data: [] };
+	const signedSupportUrlByPath = new Map(
+		(signedSupportAttachments.data ?? []).map((item) => [item.path, item.signedUrl])
 	);
 	const requestedProfileId = url.searchParams.get('person');
 	const profileId =
@@ -388,11 +414,91 @@ export const load = async ({ locals, params, url }) => {
 		documents: documentRows.map((document) => ({
 			...document,
 			url: signedDocumentByPath.get(document.storage_path) ?? null
+		})),
+		supportTickets: supportTickets.data ?? [],
+		supportTicketAttachments: supportAttachmentRows.map((attachment) => ({
+			...attachment,
+			url: signedSupportUrlByPath.get(attachment.storage_path) ?? null
 		}))
 	};
 };
 
 export const actions = {
+	createSupportTicket: async ({ request, locals, params }) => {
+		const access = await getWorkspaceAccess(locals, params.id);
+		if (!access || access.supportMode)
+			return fail(403, { message: 'An active workspace membership is required to contact support.' });
+		const form = await request.formData();
+		const subject = value(form, 'subject');
+		const description = value(form, 'description');
+		const category = value(form, 'category') || 'general';
+		const priority = value(form, 'priority') || 'normal';
+		const attachments = form
+			.getAll('attachments')
+			.filter((entry): entry is File => entry instanceof File && entry.size > 0);
+		if (!subject || description.length < 10)
+			return fail(400, { message: 'Add a subject and at least a short description of the issue.' });
+		if (!['general', 'access', 'billing', 'setup', 'maintenance', 'data', 'bug'].includes(category))
+			return fail(400, { message: 'Choose a valid support category.' });
+		if (!['low', 'normal', 'high', 'urgent'].includes(priority))
+			return fail(400, { message: 'Choose a valid support priority.' });
+		if (attachments.length > 5)
+			return fail(400, { message: 'Add no more than five screenshots or files to one ticket.' });
+		if (attachments.some((file) => file.size > 10 * 1024 * 1024))
+			return fail(400, { message: 'Each attachment must be 10 MB or smaller.' });
+		if (attachments.some((file) => !['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(file.type)))
+			return fail(400, { message: 'Only JPG, PNG, WebP, and PDF attachments are supported.' });
+		const { data: ticket, error: insertError } = await locals.supabase
+			.from('support_tickets')
+			.insert({
+				organization_id: params.id,
+				requester_user_id: access.user.id,
+				subject,
+				description,
+				category,
+				priority
+			})
+			.select('id')
+			.single();
+		if (insertError || !ticket)
+			return fail(400, { message: insertError?.message ?? 'Your support ticket could not be sent.' });
+		const uploadedPaths: string[] = [];
+		let attachmentWarning: string | null = null;
+		for (const file of attachments) {
+			const storagePath = `${params.id}/${ticket.id}/${randomUUID()}-${safeFileName(file.name)}`;
+			const upload = await locals.supabase.storage
+				.from('support-ticket-attachments')
+				.upload(storagePath, file, { contentType: file.type, upsert: false });
+			if (upload.error) {
+				attachmentWarning = `The ticket was sent, but ${file.name} could not be uploaded.`;
+				break;
+			}
+			uploadedPaths.push(storagePath);
+			const { error: attachmentError } = await locals.supabase.from('support_ticket_attachments').insert({
+				ticket_id: ticket.id, uploaded_by: access.user.id, file_name: file.name,
+				storage_path: storagePath, mime_type: file.type, file_size: file.size
+			});
+			if (attachmentError) {
+				await locals.supabase.storage.from('support-ticket-attachments').remove([storagePath]);
+				attachmentWarning = `The ticket was sent, but ${file.name} could not be attached.`;
+				break;
+			}
+		}
+		await writeAuditLog(locals, {
+			actorUserId: access.user.id,
+			organizationId: params.id,
+			action: 'client_support_ticket_created',
+			entityType: 'support_ticket',
+			entityId: ticket.id,
+			metadata: { subject, category, priority }
+		});
+		return {
+			success: true,
+			message:
+				attachmentWarning ??
+				`Support ticket sent${uploadedPaths.length ? ` with ${uploadedPaths.length} attachment${uploadedPaths.length === 1 ? '' : 's'}` : ''}. The Musha team will see it in their support queue.`
+		};
+	},
 	addProperty: async ({ request, locals, params }) => {
 		const access = await getManagedAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
@@ -1516,6 +1622,98 @@ export const actions = {
 			metadata: { propertyId, category, source, priority }
 		});
 		return { success: true, message: 'Maintenance request logged and placed on the board.' };
+	},
+	scheduleMaintenanceRequest: async ({ request, locals, params }) => {
+		const access = await getMaintenanceAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Maintenance or manager access is required.' });
+		const form = await request.formData();
+		const requestId = value(form, 'request_id');
+		const scheduledFor = value(form, 'scheduled_for');
+		if (!requestId || !/^\d{4}-\d{2}-\d{2}$/.test(scheduledFor))
+			return fail(400, { message: 'Choose a valid planned start date.' });
+		const { data: task, error: lookupError } = await locals.supabase
+			.from('maintenance_requests')
+			.select('id, status')
+			.eq('id', requestId)
+			.eq('organization_id', params.id)
+			.maybeSingle();
+		if (lookupError || !task) return fail(404, { message: 'Maintenance task not found.' });
+		if (['completed', 'closed'].includes(task.status))
+			return fail(400, { message: 'Completed work cannot be planned again.' });
+		const { error } = await locals.supabase
+			.from('maintenance_requests')
+			.update({
+				status: ['reported', 'triage'].includes(task.status) ? 'assigned' : task.status,
+				scheduled_for: scheduledFor,
+				assigned_person_id: value(form, 'assigned_person_id') || null,
+				vendor_id: value(form, 'vendor_id') || null
+			})
+			.eq('id', requestId)
+			.eq('organization_id', params.id);
+		if (error) return fail(400, { message: error.message });
+		await writeAuditLog(locals, {
+			actorUserId: access.user.id,
+			organizationId: params.id,
+			action: 'maintenance_task_planned',
+			entityType: 'maintenance_request',
+			entityId: requestId,
+			metadata: { scheduledFor }
+		});
+		return { success: true, message: 'Maintenance task planned and assigned.' };
+	},
+	startMaintenanceTask: async ({ request, locals, params }) => {
+		const access = await getMaintenanceAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Maintenance or manager access is required.' });
+		const requestId = value(await request.formData(), 'request_id');
+		if (!requestId) return fail(400, { message: 'Choose a maintenance task to start.' });
+		const { data: task, error: lookupError } = await locals.supabase
+			.from('maintenance_requests')
+			.select('id, scheduled_for')
+			.eq('id', requestId)
+			.eq('organization_id', params.id)
+			.maybeSingle();
+		if (lookupError || !task) return fail(404, { message: 'Maintenance task not found.' });
+		if (!task.scheduled_for) return fail(400, { message: 'Plan a start date before beginning this task.' });
+		const { error } = await locals.supabase
+			.from('maintenance_requests')
+			.update({ status: 'in_progress' })
+			.eq('id', requestId)
+			.eq('organization_id', params.id);
+		if (error) return fail(400, { message: error.message });
+		await writeAuditLog(locals, {
+			actorUserId: access.user.id,
+			organizationId: params.id,
+			action: 'maintenance_task_started',
+			entityType: 'maintenance_request',
+			entityId: requestId
+		});
+		return { success: true, message: 'Maintenance task is now in progress.' };
+	},
+	finishMaintenanceTask: async ({ request, locals, params }) => {
+		const access = await getMaintenanceAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Maintenance or manager access is required.' });
+		const form = await request.formData();
+		const requestId = value(form, 'request_id');
+		if (!requestId) return fail(400, { message: 'Choose a maintenance task to finish.' });
+		const { error } = await locals.supabase
+			.from('maintenance_requests')
+			.update({
+				status: 'completed',
+				completed_at: new Date().toISOString(),
+				resolution_notes: value(form, 'resolution_notes') || null,
+				actual_cost: numberOrNull(form.get('actual_cost'))
+			})
+			.eq('id', requestId)
+			.eq('organization_id', params.id);
+		if (error) return fail(400, { message: error.message });
+		await writeAuditLog(locals, {
+			actorUserId: access.user.id,
+			organizationId: params.id,
+			action: 'maintenance_task_completed',
+			entityType: 'maintenance_request',
+			entityId: requestId
+		});
+		return { success: true, message: 'Maintenance task completed and moved to history.' };
 	},
 	updateMaintenanceRequest: async ({ request, locals, params }) => {
 		const access = await getMaintenanceAccess(locals, params.id);

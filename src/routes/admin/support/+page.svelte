@@ -5,6 +5,8 @@
 	const organizationName = (id: string) =>
 		data.organizations.find((organization) => organization.id === id)?.name ??
 		'Unknown organization';
+	const attachmentsFor = (ticketId: string) =>
+		data.attachments.filter((attachment: { ticket_id: string }) => attachment.ticket_id === ticketId);
 </script>
 
 <svelte:head><title>Support centre · Musha platform</title></svelte:head>
@@ -98,6 +100,7 @@
 									<span class="priority {ticket.priority}">{ticket.priority}</span>
 								</div>
 								<p>{ticket.description}</p>
+								{#if attachmentsFor(ticket.id).length}<div class="ticket-attachments">{#each attachmentsFor(ticket.id) as attachment (attachment.id)}<a href={attachment.url ?? '#'} target="_blank" rel="noreferrer">{attachment.mime_type?.startsWith('image/') ? 'View image' : 'Open file'} · {attachment.file_name}</a>{/each}</div>{/if}
 								<form method="POST" action="?/updateTicket" class="ticket-controls">
 									<input type="hidden" name="id" value={ticket.id} /><select
 										name="status"
@@ -347,6 +350,8 @@
 		line-height: 1.5;
 		margin: 9px 0;
 	}
+	.ticket-attachments { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0; }
+	.ticket-attachments a { background: #edf5d9; border-radius: 6px; color: #4b7357; font-size: 11px; padding: 6px 8px; text-decoration: none; }
 	.priority {
 		padding: 4px 6px;
 		border-radius: 99px;

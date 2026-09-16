@@ -18,7 +18,7 @@ export const load = async ({ locals }) => {
 			.limit(50),
 		locals.supabase.from('organizations').select('id, name, status').order('name')
 	]);
-	const [{ data: tickets }, { data: platformTeam }] = await Promise.all([
+	const [{ data: tickets }, { data: platformTeam }, { data: attachments }] = await Promise.all([
 		locals.supabase
 			.from('support_tickets')
 			.select(
@@ -29,8 +29,22 @@ export const load = async ({ locals }) => {
 		locals.supabase
 			.from('platform_members')
 			.select('user_id, display_name, role')
-			.order('display_name')
+			.order('display_name'),
+		locals.supabase
+			.from('support_ticket_attachments')
+			.select('id, ticket_id, file_name, storage_path, mime_type, file_size')
+			.order('created_at', { ascending: false })
 	]);
+	const attachmentRows = attachments ?? [];
+	const signedAttachments = attachmentRows.length
+		? await locals.supabase.storage.from('support-ticket-attachments').createSignedUrls(
+				attachmentRows.map((attachment) => attachment.storage_path),
+				3600
+			)
+		: { data: [] };
+	const signedUrlByPath = new Map(
+		(signedAttachments.data ?? []).map((item) => [item.path, item.signedUrl])
+	);
 	return {
 		access: 'granted' as const,
 		currentUserId: access.user.id,
@@ -38,6 +52,10 @@ export const load = async ({ locals }) => {
 		sessions: sessions ?? [],
 		organizations: organizations ?? [],
 		tickets: tickets ?? [],
+		attachments: attachmentRows.map((attachment) => ({
+			...attachment,
+			url: signedUrlByPath.get(attachment.storage_path) ?? null
+		})),
 		platformTeam: platformTeam ?? []
 	};
 };

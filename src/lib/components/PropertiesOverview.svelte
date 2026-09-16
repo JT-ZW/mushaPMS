@@ -46,6 +46,7 @@
 		spaces.filter((space: Space) => space.status === 'occupied').length
 	);
 	const vacantCount = $derived(spaces.filter((space: Space) => space.status === 'vacant').length);
+	let view = $state<'register' | 'map'>('register');
 </script>
 
 <svelte:head><title>Properties · {organization.currency_code} · Musha</title></svelte:head>
@@ -80,9 +81,10 @@
 			>
 		</div>
 	</div>
+	<nav class="property-tabs" aria-label="Property views"><button class:active={view === 'register'} onclick={() => (view = 'register')}>Property register</button><button class:active={view === 'map'} onclick={() => (view = 'map')}>Portfolio map</button></nav>
 
 	<div class="overview-grid">
-		<section class="panel property-panel">
+		{#if view === 'register'}<section class="panel property-panel">
 			<div class="panel-heading">
 				<div>
 					<p class="eyebrow">All locations</p>
@@ -145,14 +147,14 @@
 									>{property.code ?? 'No reference code'} · {property.latitude && property.longitude
 										? 'Mapped location'
 										: 'Location not pinned'}</small
-								><a href={resolve(`/workspace/${organization.id}/new-property`)}>Manage spaces →</a>
+								><a href={resolve(`/workspace/${organization.id}/properties/${property.id}`)}>View property →</a>
 							</div>
 						</article>
 					{/each}
 				</div>
 			{/if}
-		</section>
-		<section class="panel map-panel">
+		</section>{/if}
+		{#if view === 'map'}<section class="panel map-panel">
 			<div class="panel-heading">
 				<div>
 					<p class="eyebrow">Portfolio map</p>
@@ -170,7 +172,7 @@
 					> and pin it during setup.
 				</p>
 			</div>
-		</section>
+		</section>{/if}
 	</div>
 </section>
 
@@ -286,8 +288,9 @@
 		align-items: start;
 		display: grid;
 		gap: 14px;
-		grid-template-columns: minmax(0, 1.25fr) minmax(330px, 0.75fr);
+		grid-template-columns: 1fr;
 	}
+	.property-tabs{display:flex;gap:8px}.property-tabs button{background:#fff;border:1px solid #dce9e0;border-radius:7px;color:#557568;cursor:pointer;font:inherit;font-size:12px;font-weight:700;padding:10px 13px}.property-tabs button.active{background:#eaf3d7;color:#2f694e}
 	.panel {
 		background: #fff;
 		border: 1px solid #e1ebe2;

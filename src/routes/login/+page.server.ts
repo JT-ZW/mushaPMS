@@ -36,7 +36,13 @@ export const actions = {
 		if (
 			organizationMember &&
 			organization &&
-			!['suspended', 'archived'].includes(organization.status)
+			organization.status === 'suspended'
+		)
+			throw redirect(303, '/subscription-inactive');
+		if (
+			organizationMember &&
+			organization &&
+			!['archived'].includes(organization.status)
 		)
 			throw redirect(303, `/workspace/${organizationMember.organization_id}`);
 
@@ -56,6 +62,6 @@ export const actions = {
 		)
 			throw redirect(303, '/tenant');
 
-		throw redirect(303, '/login');
+		throw redirect(303, '/subscription-inactive');
 	}
 };

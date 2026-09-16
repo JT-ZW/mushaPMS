@@ -8,6 +8,7 @@
 		| 'audit'
 		| 'team'
 		| 'billing'
+		| 'operations'
 		| 'imports'
 		| 'settings'
 		| 'system';
@@ -23,6 +24,7 @@
 		{ label: 'Audit log', short: '≋', href: '/admin/audit', key: 'audit' },
 		{ label: 'Platform team', short: '＋', href: '/admin/team', key: 'team' },
 		{ label: 'Billing & plans', short: '$', href: '/admin/billing', key: 'billing' },
+		{ label: 'Operations hub', short: '◫', href: '/admin/operations', key: 'operations' },
 		{ label: 'Data imports', short: '⇧', href: '/admin/imports', key: 'imports' },
 		{ label: 'Platform settings', short: '⚙', href: '/admin/settings', key: 'settings' },
 		{ label: 'System health', short: '◉', href: '/admin/system', key: 'system' }

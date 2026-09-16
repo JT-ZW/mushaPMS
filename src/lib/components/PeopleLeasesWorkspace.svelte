@@ -108,8 +108,9 @@
 		if (profileId) {
 			selectedPersonId = profileId;
 			profileOpen = true;
-		} else if (!selectedPersonId && tenantPeople.length) {
-			selectedPersonId = tenantPeople[0].id;
+		} else {
+			selectedPersonId = '';
+			profileOpen = false;
 		}
 	});
 	const selectedPerson = $derived(
@@ -268,7 +269,7 @@
 						? label(kind)
 						: 'Not assigned';
 	const tenantProfileHref = (personId: string) =>
-		`${href('tenants')}?person=${encodeURIComponent(personId)}`;
+		`${href('tenants')}/${encodeURIComponent(personId)}`;
 </script>
 
 <section class="people-workspace" aria-labelledby="people-title">

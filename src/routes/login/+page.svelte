@@ -211,7 +211,7 @@
 		text-decoration: underline;
 		text-underline-offset: 3px;
 	}
-	.login-card button {
+	.login-card form > button[type='submit'] {
 		margin-top: 7px;
 		border: 0;
 		border-radius: 7px;

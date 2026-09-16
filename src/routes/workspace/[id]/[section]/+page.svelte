@@ -8,6 +8,7 @@
 	import FinanceWorkspace from '$lib/components/FinanceWorkspace.svelte';
 	import PeopleLeasesWorkspace from '$lib/components/PeopleLeasesWorkspace.svelte';
 	import ReportsWorkspace from '$lib/components/ReportsWorkspace.svelte';
+	import SupportWorkspace from '$lib/components/SupportWorkspace.svelte';
 	import { resolve } from '$app/paths';
 
 	let { data, form } = $props();
@@ -833,6 +834,8 @@
 		</div>
 	{:else if data.sectionKey === 'maintenance'}
 		<MaintenanceWorkspace {data} {form} />
+	{:else if data.sectionKey === 'support'}
+		<SupportWorkspace tickets={data.supportTickets} attachments={data.supportTicketAttachments} {form} />
 	{:else if data.sectionKey === 'reports' && false}
 		<div class="metric-row">
 			<div>

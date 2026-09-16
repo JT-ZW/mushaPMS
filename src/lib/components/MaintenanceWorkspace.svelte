@@ -84,6 +84,13 @@
 	const plannedRequests = $derived(
 		visibleRequests.filter((item: { scheduled_for?: string | null }) => Boolean(item.scheduled_for))
 	);
+	const workQueue = $derived(
+		[...openRequests].sort(
+			(a: { scheduled_for?: string | null; created_at: string }, b: { scheduled_for?: string | null; created_at: string }) =>
+				(a.scheduled_for ?? '9999-12-31').localeCompare(b.scheduled_for ?? '9999-12-31') ||
+				b.created_at.localeCompare(a.created_at)
+		)
+	);
 	const historyRequests = $derived(
 		visibleRequests.filter((item: { status: string }) =>
 			['completed', 'closed'].includes(item.status)
@@ -305,7 +312,7 @@
 					<div>
 						<p class="eyebrow">New request</p>
 						<h2>Log a maintenance issue</h2>
-						<p>Capture the location, category and next action in one quick pass.</p>
+						<p>Capture what was reported. Planning and assignment happen separately in Planned work.</p>
 					</div>
 					<span class="count">{data.maintenance.length} total</span>
 				</div>
@@ -362,13 +369,6 @@
 										value="inspection">Inspection</option
 									><option value="preventive">Preventive</option></select
 								></label
-							><label
-								>Vendor<select name="vendor_id"
-									><option value="">Not assigned</option
-									>{#each activeVendors as vendor (vendor.id)}<option value={vendor.id}
-											>{vendor.business_name}</option
-										>{/each}</select
-								></label
 							>
 						</div>
 						<label
@@ -378,9 +378,8 @@
 								placeholder="What happened, when it was noticed, access notes, and any safety concern"
 							></textarea></label
 						>
-						<div class="form-grid three schedule-fields">
-							<label>Schedule for<input name="scheduled_for" type="date" /></label><label
-								>Service target<input name="sla_due_at" type="datetime-local" /></label
+						<div class="form-grid two schedule-fields">
+							<label>Service target <small>Optional</small><input name="sla_due_at" type="datetime-local" /></label><label
 							><label
 								>Estimated cost ({data.organization.currency_code})<input
 									name="estimated_cost"
@@ -397,8 +396,8 @@
 				<div class="panel-heading">
 					<div>
 						<p class="eyebrow">Request board</p>
-						<h2>Move work forward</h2>
-						<p>Client and staff requests appear together here.</p>
+						<h2>Reported issues</h2>
+						<p>This is the intake record. Assignment, scheduling, and progress are managed in Planned work.</p>
 					</div>
 				</div>
 				<div class="filters">
@@ -444,7 +443,7 @@
 									</div>
 								</div>
 								<div class="request-meta">
-									<span><b>Source</b>{label(sourceLabels, request.source)}</span><span
+									<span><b>Reported by</b>{request.reporter_person_id ? personName(request.reporter_person_id) : 'Not linked'}</span><span
 										><b>Reported</b>{dateLabel(request.reported_at ?? request.created_at)}</span
 									><span><b>Assigned</b>{personName(request.assigned_person_id)}</span><span
 										><b>Estimate</b>{request.estimated_cost
@@ -569,24 +568,20 @@
 			<div class="panel-heading">
 				<div>
 					<p class="eyebrow">Planned work</p>
-					<h2>Upcoming maintenance</h2>
-					<p>Scheduled work is easy to scan before the week gets busy.</p>
+					<h2>Plan and deliver work</h2>
+					<p>Assign an internal team member or contractor, set the planned start, then move each task through to completion.</p>
 				</div>
 				<button class="secondary" type="button" onclick={() => (view = 'requests')}
 					>Manage requests <span>→</span></button
 				>
 			</div>
-			{#if plannedRequests.length === 0}<div class="empty">
-					<strong>No scheduled work yet.</strong>
-					<p>Add a scheduled date to a request and it will appear here.</p>
+			{#if workQueue.length === 0}<div class="empty">
+					<strong>No open maintenance work.</strong>
+					<p>New requests will appear here for internal planning.</p>
 				</div>{:else}<div class="planned-list">
-					{#each plannedRequests as request (request.id)}<div class="planned-row">
+					{#each workQueue as request (request.id)}<article class="planned-task"><div class="planned-row">
 							<div class="date-block">
-								<strong>{new Date(request.scheduled_for).getDate()}</strong><small
-									>{new Intl.DateTimeFormat('en-GB', { month: 'short' }).format(
-										new Date(request.scheduled_for)
-									)}</small
-								>
+								{#if request.scheduled_for}<strong>{new Date(request.scheduled_for).getDate()}</strong><small>{new Intl.DateTimeFormat('en-GB', { month: 'short' }).format(new Date(request.scheduled_for))}</small>{:else}<strong>+</strong><small>Plan</small>{/if}
 							</div>
 							<div>
 								<strong>{request.title}</strong><small
@@ -599,8 +594,17 @@
 							<span class="tag priority {request.priority}"
 								>{label(priorityLabels, request.priority)}</span
 							><span class="tag status {request.status}">{label(statusLabels, request.status)}</span
-							><span class="muted">{personName(request.assigned_person_id)}</span>
-						</div>{/each}
+							><span class="muted">{request.vendor_id ? vendorName(request.vendor_id) : personName(request.assigned_person_id)}</span>
+						</div>
+						<form method="POST" action="?/scheduleMaintenanceRequest" class="task-plan-form">
+							<input type="hidden" name="request_id" value={request.id} />
+							<label>Planned start<input name="scheduled_for" type="date" value={request.scheduled_for ?? ''} required /></label>
+							<label>Internal team<select name="assigned_person_id"><option value="">Not assigned</option>{#each data.people as person (person.id)}<option value={person.id} selected={request.assigned_person_id === person.id}>{person.first_name} {person.last_name}</option>{/each}</select></label>
+							<label>Contractor<select name="vendor_id"><option value="">No contractor</option>{#each activeVendors as vendor (vendor.id)}<option value={vendor.id} selected={request.vendor_id === vendor.id}>{vendor.business_name}</option>{/each}</select></label>
+							<button class="secondary" type="submit">Save plan</button>
+						</form>
+						{#if request.status === 'in_progress'}<form method="POST" action="?/finishMaintenanceTask" class="task-complete-form"><input type="hidden" name="request_id" value={request.id} /><input name="resolution_notes" placeholder="Work completed / resolution notes" /><input name="actual_cost" type="number" min="0" step="0.01" placeholder={`Actual cost (${data.organization.currency_code})`} /><button class="primary" type="submit">Finish task <span>→</span></button></form>{:else if request.status !== 'completed' && request.status !== 'closed'}<form method="POST" action="?/startMaintenanceTask" class="task-start-form"><input type="hidden" name="request_id" value={request.id} /><button class="primary" type="submit" disabled={!request.scheduled_for}>Start maintenance task <span>→</span></button>{#if !request.scheduled_for}<small>Set a planned start before starting this task.</small>{/if}</form>{/if}
+					</article>{/each}
 				</div>{/if}
 		</section>
 	{:else if view === 'vendors'}
@@ -1433,6 +1437,15 @@
 		margin-bottom: 4px;
 		text-transform: uppercase;
 	}
+	/* The request board is an intake record. Internal workflow controls belong in Planned work. */
+	.board-panel .request-meta span:nth-child(n + 3),
+	.board-panel .progress-line,
+	.board-panel .request-edit,
+	.board-panel .quick-update,
+	.board-panel .attachment-upload,
+	.board-panel .attachment-row form {
+		display: none;
+	}
 	.request-edit {
 		flex-wrap: wrap;
 		align-items: stretch;
@@ -1486,6 +1499,47 @@
 		align-items: center;
 		border-bottom: 1px solid #edf2ed;
 		padding: 12px 0;
+	}
+	.planned-task {
+		border: 1px solid #e3ede4;
+		border-radius: 11px;
+		padding: 0 14px 14px;
+	}
+	.planned-task .planned-row {
+		border-bottom: 1px solid #edf2ed;
+	}
+	.task-plan-form,
+	.task-complete-form,
+	.task-start-form {
+		display: grid;
+		gap: 9px;
+		margin-top: 12px;
+	}
+	.task-plan-form {
+		grid-template-columns: minmax(130px, 0.9fr) minmax(150px, 1fr) minmax(150px, 1fr) auto;
+		align-items: end;
+	}
+	.task-plan-form .secondary,
+	.task-complete-form .primary,
+	.task-start-form .primary {
+		align-self: end;
+		white-space: nowrap;
+	}
+	.task-complete-form {
+		grid-template-columns: minmax(220px, 1fr) minmax(130px, 0.4fr) auto;
+		align-items: end;
+	}
+	.task-start-form {
+		grid-template-columns: auto 1fr;
+		align-items: center;
+	}
+	.task-start-form small {
+		color: #8a9f94;
+		font-size: 10px;
+	}
+	.primary:disabled {
+		cursor: not-allowed;
+		opacity: 0.45;
 	}
 	.planned-row:last-child,
 	.history-row:last-child {
@@ -1810,6 +1864,11 @@
 		}
 		.history-row {
 			gap: 8px 12px;
+		}
+		.task-plan-form,
+		.task-complete-form,
+		.task-start-form {
+			grid-template-columns: 1fr;
 		}
 	}
 	@media (max-width: 480px) {

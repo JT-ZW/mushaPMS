@@ -1,310 +1,40 @@
 <script lang="ts">
 	import AdminChrome from '$lib/components/AdminChrome.svelte';
 	let { data, form } = $props();
-	const subscriptionFor = (organizationId: string) =>
-		data.subscriptions.find((subscription) => subscription.organization_id === organizationId);
+	const today = new Date().toISOString().slice(0, 10);
+	const defaultEnd = new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().slice(0, 10);
+	const subscriptionFor = (organizationId: string) => data.subscriptions.find((subscription) => subscription.organization_id === organizationId);
+	const organizationName = (organizationId: string) => data.organizations.find((organization) => organization.id === organizationId)?.name ?? 'Unknown organization';
+	const paymentsFor = (organizationId: string) => data.payments.filter((payment) => payment.organization_id === organizationId);
+	const money = (amount: number | string, currency = 'USD') => new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(amount));
 </script>
 
-<svelte:head><title>Billing and plans · Musha platform</title></svelte:head>
+<svelte:head><title>Subscription manager · Musha platform</title></svelte:head>
 
 <AdminChrome active="billing">
-	{#if data.access === 'denied'}<section class="blocked">
-			<p class="eyebrow">Permission required</p>
-			<h1>Billing access is restricted.</h1>
-		</section>{:else}<section class="heading">
-			<div>
-				<p class="eyebrow">Commercial operations</p>
-				<h1>Billing & plans<span>.</span></h1>
-				<p>
-					Assign a plan, track client status, and keep commercial context alongside the workspace.
-				</p>
-			</div>
-			<span class="security">No payment gateway connected</span>
-		</section>
+	{#if data.access === 'denied'}
+		<section class="blocked"><p class="eyebrow">Permission required</p><h1>Billing access is restricted.</h1></section>
+	{:else}
+		<section class="heading"><div><p class="eyebrow">Commercial operations</p><h1>Subscription manager<span>.</span></h1><p>Record manual client payments, set subscription periods, and control workspace access without a payment gateway.</p></div><form method="POST" action="?/refreshExpiries"><button class="secondary" type="submit">Refresh expired subscriptions</button></form></section>
 		{#if form?.message}<div class:failure={!form.success} class="notice">{form.message}</div>{/if}
-		<div class="plan-grid">
-			{#each data.plans as plan (plan.id)}<article class="plan-card">
-					<span class="eyebrow">Plan</span>
-					<h2>{plan.name}</h2>
-					<strong
-						>{plan.monthly_price === 0
-							? 'Free'
-							: `${plan.currency_code} ${plan.monthly_price}`}<small>/ month</small></strong
-					>
-					<p>
-						{plan.property_limit
-							? `Up to ${plan.property_limit} properties`
-							: 'Unlimited properties'} · {plan.space_limit
-							? `${plan.space_limit} spaces`
-							: 'Unlimited spaces'}
-					</p>
-				</article>{/each}
-		</div>
-		<section class="table-card">
-			<div class="table-heading">
-				<div>
-					<p class="eyebrow">Client subscriptions</p>
-					<h2>Portfolio coverage</h2>
-				</div>
-				<span class="count">{data.organizations.length}</span>
-			</div>
-			{#if data.organizations.length === 0}<div class="empty">No organizations yet.</div>{:else}<div
-					class="subscription-list"
-				>
-					{#each data.organizations as organization (organization.id)}{@const subscription =
-							subscriptionFor(organization.id)}
-						<article class="subscription-row">
-							<div class="org">
-								<span class="avatar">{organization.name.slice(0, 1).toUpperCase()}</span><span
-									><strong>{organization.name}</strong><small>{organization.status}</small></span
-								>
-							</div>
-							<div class="current-plan">
-								<span>Current plan</span><strong
-									>{subscription?.platform_plans?.[0]?.name ?? 'Not assigned'}</strong
-								>
-							</div>
-							<form method="POST" action="?/assignPlan">
-								<input type="hidden" name="organization_id" value={organization.id} /><select
-									name="plan_id"
-									required
-									><option value="">Assign plan</option>{#each data.plans as plan (plan.id)}<option
-											value={plan.id}
-											selected={subscription?.plan_id === plan.id}>{plan.name}</option
-										>{/each}</select
-								><select name="status"
-									><option value="trial" selected={subscription?.status === 'trial'}>Trial</option
-									><option value="active" selected={subscription?.status === 'active'}
-										>Active</option
-									><option value="past_due" selected={subscription?.status === 'past_due'}
-										>Past due</option
-									><option value="paused" selected={subscription?.status === 'paused'}
-										>Paused</option
-									><option value="cancelled" selected={subscription?.status === 'cancelled'}
-										>Cancelled</option
-									></select
-								><button type="submit">Save</button>
-							</form>
-						</article>{/each}
-				</div>{/if}
-		</section>{/if}
+
+		<div class="metric-grid"><div><span>Active</span><strong>{data.subscriptions.filter((item) => item.status === 'active').length}</strong></div><div><span>Paused / inactive</span><strong>{data.subscriptions.filter((item) => ['paused', 'inactive'].includes(item.status)).length}</strong></div><div><span>Payments recorded</span><strong>{data.payments.filter((item) => item.status === 'paid').length}</strong></div><div><span>Awaiting payment</span><strong>{data.payments.filter((item) => item.status === 'pending').length}</strong></div></div>
+
+		<div class="plan-grid">{#each data.plans as plan (plan.id)}<article class="plan-card"><span class="eyebrow">Plan</span><h2>{plan.name}</h2><strong>{plan.monthly_price === 0 ? 'Free' : `${plan.currency_code} ${plan.monthly_price}`}<small>/ month</small></strong><p>{plan.property_limit ? `Up to ${plan.property_limit} properties` : 'Unlimited properties'} · {plan.space_limit ? `${plan.space_limit} spaces` : 'Unlimited spaces'}</p></article>{/each}</div>
+
+		<section class="table-card"><div class="table-heading"><div><p class="eyebrow">Client subscriptions</p><h2>Renewals and access</h2><p>Recording a paid renewal activates the workspace. Pausing or expiry suspends it until manually reactivated or renewed.</p></div><span class="count">{data.organizations.length}</span></div>
+			{#if data.organizations.length === 0}<div class="empty">No organizations yet.</div>{:else}<div class="subscription-list">{#each data.organizations as organization (organization.id)}
+				{@const subscription = subscriptionFor(organization.id)}
+				<article class="subscription-card"><div class="subscription-summary"><div class="org"><span class="avatar">{organization.name.slice(0, 1).toUpperCase()}</span><span><strong>{organization.name}</strong><small>{organization.status} · {subscription?.platform_plans?.[0]?.name ?? 'No plan selected'}</small></span></div><div><span>Subscription status</span><strong class="status {subscription?.status ?? 'unassigned'}">{subscription?.status ?? 'unassigned'}</strong></div><div><span>Current period</span><strong>{subscription?.current_period_starts_on ?? '—'} to {subscription?.current_period_ends_on ?? '—'}</strong></div><div class="actions">{#if subscription}<form method="POST" action={subscription.status === 'paused' || subscription.status === 'inactive' ? '?/activateSubscription' : '?/pauseSubscription'}><input type="hidden" name="organization_id" value={organization.id} /><button class:danger={subscription.status !== 'paused' && subscription.status !== 'inactive'} type="submit">{subscription.status === 'paused' || subscription.status === 'inactive' ? 'Activate subscription' : 'Pause subscription'}</button></form>{/if}</div></div>
+					<form method="POST" action="?/renewSubscription" class="renewal-form"><input type="hidden" name="organization_id" value={organization.id} /><label>Plan<select name="plan_id" required><option value="">Choose plan</option>{#each data.plans as plan (plan.id)}<option value={plan.id} selected={subscription?.plan_id === plan.id}>{plan.name}</option>{/each}</select></label><label>Billing cycle<select name="billing_cycle"><option value="monthly" selected={subscription?.billing_cycle === 'monthly'}>Monthly</option><option value="quarterly" selected={subscription?.billing_cycle === 'quarterly'}>Quarterly</option><option value="annual" selected={subscription?.billing_cycle === 'annual'}>Annual</option></select></label><label>Period start<input type="date" name="period_start" value={today} required /></label><label>Period end<input type="date" name="period_end" value={defaultEnd} required /></label><label>Amount <small>(optional)</small><input type="number" min="0" step="0.01" name="amount" placeholder="Uses plan price" /></label><label>Payment status<select name="payment_status"><option value="paid">Paid</option><option value="pending">Pending</option><option value="void">Void</option></select></label><label>Paid on<input type="date" name="paid_on" value={today} /></label><label>Reference<input name="reference" placeholder="Receipt or transfer reference" /></label><label class="wide">Notes<input name="notes" placeholder="Optional internal note" /></label><button class="primary" type="submit">Record payment & renew →</button></form>
+					{#if paymentsFor(organization.id).length}<div class="recent-payments"><span>Latest payment: </span>{#each paymentsFor(organization.id).slice(0, 2) as payment (payment.id)}<em>{money(payment.amount, payment.currency_code)} · {payment.status} · {payment.subscription_period_end}</em>{/each}</div>{/if}
+				</article>{/each}</div>{/if}
+		</section>
+
+		<section class="table-card payments-card"><div class="table-heading"><div><p class="eyebrow">Manual payment ledger</p><h2>Client payments</h2><p>Update a pending payment to paid once funds have been received.</p></div><span class="count">{data.payments.length}</span></div>{#if data.payments.length === 0}<div class="empty">No payments recorded yet.</div>{:else}<div class="payment-list">{#each data.payments as payment (payment.id)}<article class="payment-row"><div><strong>{organizationName(payment.organization_id)}</strong><small>{payment.subscription_period_start} to {payment.subscription_period_end} · {payment.billing_cycle}</small></div><div><strong>{money(payment.amount, payment.currency_code)}</strong><small>{payment.reference ?? payment.payment_method ?? 'No reference'}</small></div><form method="POST" action="?/updatePaymentStatus"><input type="hidden" name="payment_id" value={payment.id} /><input type="date" name="paid_on" value={payment.paid_on ?? today} /><select name="status" value={payment.status}><option value="pending">Pending</option><option value="paid">Paid</option><option value="void">Void</option></select><button type="submit">Save</button></form></article>{/each}</div>{/if}</section>
+	{/if}
 </AdminChrome>
 
 <style>
-	.eyebrow {
-		color: #7b9588;
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.16em;
-		margin: 0 0 9px;
-		text-transform: uppercase;
-	}
-	.heading {
-		display: flex;
-		align-items: flex-end;
-		justify-content: space-between;
-		gap: 20px;
-		margin-bottom: 35px;
-	}
-	h1 {
-		font-size: clamp(35px, 5vw, 58px);
-		line-height: 0.95;
-		letter-spacing: -0.08em;
-		margin: 0 0 15px;
-	}
-	h1 span {
-		color: var(--musha-lime);
-	}
-	.heading p:not(.eyebrow) {
-		color: #718a7e;
-		font-size: 13px;
-		margin: 0;
-	}
-	.security {
-		background: #e9f1e9;
-		color: #557568;
-		border-radius: 99px;
-		padding: 8px 11px;
-		font-size: 10px;
-		white-space: nowrap;
-	}
-	.notice {
-		background: #e6f2e6;
-		color: #39704c;
-		border-radius: 7px;
-		padding: 11px 13px;
-		margin: -10px 0 18px;
-		font-size: 11px;
-	}
-	.notice.failure {
-		background: #fae9e5;
-		color: #955549;
-	}
-	.plan-grid {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 10px;
-		margin-bottom: 14px;
-	}
-	.plan-card,
-	.table-card {
-		background: #fff;
-		border: 1px solid #e4ebe4;
-		border-radius: 10px;
-	}
-	.plan-card {
-		padding: 20px;
-	}
-	.plan-card h2 {
-		margin: 0 0 16px;
-		font-size: 19px;
-		letter-spacing: -0.05em;
-	}
-	.plan-card > strong {
-		display: block;
-		font-size: 24px;
-		letter-spacing: -0.06em;
-	}
-	.plan-card > strong small {
-		color: #91a198;
-		font-size: 10px;
-		letter-spacing: 0;
-	}
-	.plan-card p {
-		color: #82968c;
-		font-size: 10px;
-		line-height: 1.5;
-		margin: 8px 0 0;
-	}
-	.table-heading {
-		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
-		padding: 22px 24px;
-		border-bottom: 1px solid #edf2ed;
-	}
-	.table-heading h2 {
-		margin: 0;
-		font-size: 19px;
-		letter-spacing: -0.05em;
-	}
-	.count {
-		background: #edf4dc;
-		color: #668a6d;
-		border-radius: 99px;
-		padding: 7px 10px;
-		font-size: 10px;
-	}
-	.subscription-list {
-		display: grid;
-	}
-	.subscription-row {
-		display: grid;
-		grid-template-columns: 1.2fr 0.8fr 1.5fr;
-		align-items: center;
-		gap: 15px;
-		padding: 13px 24px;
-		border-bottom: 1px solid #edf2ed;
-	}
-	.subscription-row:last-child {
-		border-bottom: 0;
-	}
-	.org {
-		display: flex;
-		align-items: center;
-		gap: 9px;
-		min-width: 0;
-	}
-	.avatar {
-		display: grid;
-		place-items: center;
-		width: 30px;
-		height: 30px;
-		flex: 0 0 30px;
-		border-radius: 8px;
-		background: #edf4dc;
-		color: #5d8667;
-		font-size: 12px;
-		font-weight: 700;
-	}
-	.org strong,
-	.org small,
-	.current-plan span,
-	.current-plan strong {
-		display: block;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.org strong,
-	.current-plan strong {
-		color: #345b4b;
-		font-size: 11px;
-	}
-	.org small,
-	.current-plan span {
-		color: #91a198;
-		font-size: 9px;
-		margin-top: 3px;
-		text-transform: capitalize;
-	}
-	.subscription-row form {
-		display: flex;
-		gap: 6px;
-	}
-	.subscription-row select,
-	.subscription-row button {
-		min-width: 0;
-		border: 1px solid #dfe9e1;
-		border-radius: 6px;
-		background: #fbfcfa;
-		color: #557568;
-		padding: 8px;
-		font-size: 10px;
-	}
-	.subscription-row select {
-		flex: 1;
-	}
-	.subscription-row button {
-		background: var(--musha-deep);
-		border-color: var(--musha-deep);
-		color: #fff;
-		cursor: pointer;
-	}
-	.empty,
-	.blocked {
-		padding: 25px;
-		color: #81958b;
-		font-size: 12px;
-	}
-	.blocked {
-		background: #fff8f5;
-		border: 1px solid #f0ded7;
-		border-radius: 10px;
-	}
-	.blocked h1 {
-		font-size: 32px;
-		letter-spacing: -0.07em;
-	}
-	@media (max-width: 850px) {
-		.plan-grid {
-			grid-template-columns: 1fr;
-		}
-		.subscription-row {
-			grid-template-columns: 1fr;
-			gap: 9px;
-		}
-	}
-	@media (max-width: 600px) {
-		.heading {
-			display: block;
-		}
-		.security {
-			display: inline-block;
-			margin-top: 18px;
-		}
-		.subscription-row form {
-			flex-wrap: wrap;
-		}
-	}
+	.eyebrow{color:#7b9588;font-size:10px;font-weight:700;letter-spacing:.16em;margin:0 0 9px;text-transform:uppercase}.heading,.table-heading,.subscription-summary,.payment-row{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.heading{margin-bottom:28px}h1{font-size:clamp(35px,5vw,58px);line-height:.95;letter-spacing:-.08em;margin:0 0 15px}h1 span{color:var(--musha-lime)}.heading p:not(.eyebrow),.table-heading p:not(.eyebrow){color:#718a7e;font-size:13px;margin:0;max-width:680px}.notice{background:#e6f2e6;color:#39704c;border-radius:7px;padding:11px 13px;margin:-10px 0 18px;font-size:12px}.notice.failure{background:#fae9e5;color:#955549}.secondary,.actions button,.payment-row button{border:1px solid #d5e2d8;border-radius:7px;background:#fff;color:#47705d;cursor:pointer;font:inherit;font-size:11px;font-weight:700;padding:10px 12px;white-space:nowrap}.actions button.danger{border-color:#eabdb4;color:#a15143}.metric-grid,.plan-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.metric-grid>div,.plan-card,.table-card{background:#fff;border:1px solid #e4ebe4;border-radius:10px}.metric-grid>div{padding:18px}.metric-grid span,.metric-grid strong{display:block}.metric-grid span{color:#81978b;font-size:10px}.metric-grid strong{color:#234d3e;font-size:27px;letter-spacing:-.06em;margin-top:6px}.plan-grid{grid-template-columns:repeat(3,1fr)}.plan-card{padding:19px}.plan-card h2,.table-heading h2{font-size:20px;letter-spacing:-.05em;margin:0}.plan-card>strong{display:block;font-size:23px;letter-spacing:-.06em;margin-top:15px}.plan-card small{color:#91a198;font-size:10px;letter-spacing:0}.plan-card p{color:#82968c;font-size:10px;line-height:1.5;margin:8px 0 0}.table-card{margin-top:14px;overflow:hidden}.table-heading{border-bottom:1px solid #edf2ed;padding:22px 24px}.count{background:#edf4dc;border-radius:99px;color:#668a6d;font-size:10px;padding:7px 10px}.subscription-card{border-bottom:1px solid #edf2ed;padding:18px 24px}.subscription-card:last-child{border:0}.subscription-summary{align-items:center}.org{display:flex;align-items:center;gap:9px;min-width:180px}.avatar{display:grid;place-items:center;width:31px;height:31px;border-radius:8px;background:#edf4dc;color:#5d8667;font-weight:700}.org strong,.org small,.subscription-summary>div>span,.subscription-summary>div>strong,.payment-row strong,.payment-row small{display:block}.org strong,.subscription-summary strong,.payment-row strong{color:#345b4b;font-size:12px}.org small,.subscription-summary>div>span,.payment-row small{color:#91a198;font-size:10px;margin-top:4px;text-transform:capitalize}.status{border-radius:99px;display:inline-block!important;padding:5px 8px;background:#edf4dc;color:#668a6d!important}.status.paused,.status.inactive,.status.past_due,.status.cancelled{background:#fae9e5;color:#9a5548!important}.renewal-form{background:#f8faf7;border:1px solid #e3ece5;border-radius:8px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:18px;padding:14px}label{color:#557568;display:grid;font-size:10px;font-weight:700;gap:5px}label small{font-weight:400}input,select{background:#fff;border:1px solid #dfe9e1;border-radius:6px;box-sizing:border-box;color:#345b4b;font:inherit;font-size:11px;min-width:0;padding:9px;width:100%}.wide{grid-column:span 2}.primary{background:var(--musha-deep);border:0;border-radius:7px;color:#fff;cursor:pointer;font:inherit;font-size:11px;font-weight:700;padding:10px}.recent-payments{color:#81978b;display:flex;flex-wrap:wrap;font-size:10px;gap:7px;margin-top:12px}.recent-payments em{background:#edf4dc;border-radius:5px;color:#5a795f;font-style:normal;padding:4px 6px}.payment-row{align-items:center;border-bottom:1px solid #edf2ed;padding:14px 24px}.payment-row form{display:flex;gap:6px}.payment-row input{width:124px}.empty,.blocked{color:#81958b;font-size:12px;padding:25px}.blocked{background:#fff8f5;border:1px solid #f0ded7;border-radius:10px}.blocked h1{font-size:32px;letter-spacing:-.07em}@media(max-width:1050px){.metric-grid{grid-template-columns:repeat(2,1fr)}.renewal-form{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){.heading,.subscription-summary,.payment-row{display:grid}.plan-grid,.metric-grid,.renewal-form{grid-template-columns:1fr}.wide{grid-column:auto}.payment-row form{flex-wrap:wrap}}
 </style>
