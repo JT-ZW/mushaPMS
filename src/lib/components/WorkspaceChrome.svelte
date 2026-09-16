@@ -231,6 +231,7 @@
 		opacity: 0.82;
 	}
 	@media (max-width: 760px) {
+		.workspace-shell { display: block; }
 		.support-banner {
 			display: block;
 		}
@@ -241,16 +242,15 @@
 	}
 	@media (max-width: 760px) {
 		.workspace-main {
-			padding: 26px 18px 42px;
+			padding: 26px 16px 42px;
 		}
 		.workspace-sidebar {
-			width: 72px;
-			flex-basis: 72px;
-			padding: 18px 9px;
+			width: 100%;
+			height: auto;
+			padding: 10px 16px 0;
 		}
 		.workspace-brand {
-			justify-content: center;
-			padding: 0 0 24px;
+			display: none;
 		}
 		.workspace-brand .musha-logo {
 			width: 48px;
@@ -274,5 +274,11 @@
 			color: #8fca4d;
 			font-size: 19px;
 		}
+	}
+	@media (max-width: 760px) {
+		.workspace-sidebar nav { display: flex; overflow-x: auto; gap: 5px; padding-bottom: 10px; scrollbar-width: none; }
+		.workspace-sidebar nav::-webkit-scrollbar { display: none; }
+		.workspace-sidebar nav a { white-space: nowrap; padding: 10px 12px; font-size: 12px; }
+		.workspace-sidebar nav a::before { display: none; }
 	}
 </style>
