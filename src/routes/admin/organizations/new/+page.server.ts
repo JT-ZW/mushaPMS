@@ -131,7 +131,12 @@ export const actions = {
 							email: clientEmail,
 							password: temporaryPassword,
 							email_confirm: true,
-							user_metadata: { organization_id: organization.id, organization_name: name }
+							user_metadata: {
+								organization_id: organization.id,
+								organization_name: name,
+								must_change_password: true,
+								password_provisioned_at: new Date().toISOString()
+							}
 						})
 					: await adminClient.auth.admin.inviteUserByEmail(clientEmail, {
 							data: { organization_id: organization.id, organization_name: name }

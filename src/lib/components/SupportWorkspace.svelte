@@ -19,7 +19,7 @@
 		url: string | null;
 	};
 
-	let { tickets, attachments, form }: { tickets: Ticket[]; attachments: Attachment[]; form?: { success?: boolean; message?: string } } = $props();
+	let { tickets, attachments, form }: { tickets: Ticket[]; attachments: Attachment[]; form?: { success?: boolean; message?: string } | null } = $props();
 	const titleCase = (value: string) => value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 	const attachmentsFor = (ticketId: string) => attachments.filter((attachment) => attachment.ticket_id === ticketId);
 </script>

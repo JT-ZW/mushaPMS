@@ -6,7 +6,7 @@
 		data.organizations.find((organization) => organization.id === id)?.name ??
 		'Unknown organization';
 	const attachmentsFor = (ticketId: string) =>
-		data.attachments.filter((attachment: { ticket_id: string }) => attachment.ticket_id === ticketId);
+		(data.attachments ?? []).filter((attachment: { ticket_id: string }) => attachment.ticket_id === ticketId);
 </script>
 
 <svelte:head><title>Support centre · Musha platform</title></svelte:head>

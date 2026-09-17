@@ -59,10 +59,11 @@
 			></a
 		>
 		<div class="header-actions">
-			<span>{data.organization?.name ?? 'Your home'}</span>
+			<span>{data.organization?.name ?? 'Your home'}</span><a class="settings-link" href="/tenant/settings">Settings</a>
 			<form method="POST" action="/logout"><button type="submit">Sign out</button></form>
 		</div>
 	</header>
+	<nav class="portal-nav" aria-label="Tenant portal navigation"><a class="active" href="/tenant">Overview</a><a href="#lease">Lease</a><a href="#requests">Requests</a><a href="#documents">Documents</a><a href="#billing">Billing</a><a href="/tenant/settings">Settings</a></nav>
 	<main class="portal-main">
 		{#if form?.message}<div class:failure={!form.success} class="notice">
 				{form.message}<button
@@ -70,8 +71,9 @@
 					aria-label="Dismiss"
 					onclick={(event) => event.currentTarget.parentElement?.remove()}>×</button
 				>
-			</div>{/if}
-		<section class="welcome">
+				</div>{/if}
+		{#if data.user?.user_metadata?.must_change_password}<div class="security-banner">You are using a temporary password. <a href="/tenant/settings">Open Settings to choose your own password →</a></div>{/if}
+		<section class="welcome" id="overview">
 			<div>
 				<p class="eyebrow">Your Musha home</p>
 				<h1>Hello, {data.person.first_name}<span>.</span></h1>
@@ -102,7 +104,7 @@
 			<section class="card">
 				<div class="card-heading">
 					<div>
-						<p class="eyebrow">Your agreement</p>
+						<p class="eyebrow" id="lease">Your agreement</p>
 						<h2>Current lease</h2>
 					</div>
 				</div>
@@ -148,7 +150,7 @@
 			<section class="card">
 				<div class="card-heading">
 					<div>
-						<p class="eyebrow">Property care</p>
+						<p class="eyebrow" id="requests">Property care</p>
 						<h2>Report an issue</h2>
 						<p>Tell the team what happened and add a photo when useful.</p>
 					</div>
@@ -244,7 +246,7 @@
 			<section class="card">
 				<div class="card-heading">
 					<div>
-						<p class="eyebrow">Approved records</p>
+						<p class="eyebrow" id="documents">Approved records</p>
 						<h2>Your documents</h2>
 					</div>
 				</div>
@@ -292,7 +294,7 @@
 			<section class="card">
 				<div class="card-heading">
 					<div>
-						<p class="eyebrow">Billing</p>
+						<p class="eyebrow" id="billing">Billing</p>
 						<h2>Your invoices and receipts</h2>
 					</div>
 				</div>
@@ -370,6 +372,7 @@
 		color: #698087;
 		font-size: 0.85rem;
 	}
+	.settings-link { color: #397463; font-weight: 700; text-decoration: none; }
 	.header-actions button {
 		background: none;
 		border: 1px solid #d4e2d9;
@@ -378,6 +381,10 @@
 		color: #225b56;
 		cursor: pointer;
 	}
+	.portal-nav { align-items: center; background: #eef5ea; border-bottom: 1px solid #dce6df; display: flex; gap: .35rem; justify-content: center; padding: .55rem clamp(1rem, 4vw, 4rem); position: sticky; top: 0; z-index: 10; }
+	.portal-nav a { border-radius: 8px; color: #5d7f76; font-size: .78rem; font-weight: 700; padding: .62rem .85rem; text-decoration: none; }
+	.portal-nav a:hover, .portal-nav a.active { background: #075147; color: #fff; }
+	#overview, #lease, #requests, #documents, #billing { scroll-margin-top: 70px; }
 	.portal-main {
 		max-width: 1240px;
 		margin: 0 auto;
@@ -687,6 +694,8 @@
 	.notice.failure {
 		background: #a94a35;
 	}
+	.security-banner { background: #fff5df; border: 1px solid #f0dfb7; border-radius: 10px; color: #8b692b; font-size: 0.85rem; padding: 0.8rem 1rem; }
+	.security-banner a { color: #6b5725; font-weight: 800; }
 	.notice button {
 		position: absolute;
 		right: 0.7rem;
@@ -714,6 +723,8 @@
 		}
 	}
 	@media (max-width: 480px) {
+		.portal-nav { justify-content: flex-start; overflow-x: auto; }
+		.portal-nav a { flex: 0 0 auto; }
 		.summary-grid {
 			grid-template-columns: 1fr;
 		}

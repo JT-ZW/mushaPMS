@@ -62,6 +62,11 @@ const sections = {
 		eyebrow: 'Work orders',
 		copy: 'Capture issues, assign their progress, and keep a complete record.'
 	},
+	vendors: {
+		title: 'Vendor resource directory',
+		eyebrow: 'Maintenance resources',
+		copy: 'Standardise internal teams and external contractors by capability, status, and contact.'
+	},
 	support: {
 		title: 'Support',
 		eyebrow: 'Musha support',
@@ -260,7 +265,7 @@ export const load = async ({ locals, params, url }) => {
 		locals.supabase
 			.from('maintenance_vendors')
 			.select(
-				'id, business_name, contact_name, email, phone, specialties, status, emergency_available, hourly_rate, notes, created_at, updated_at'
+				'id, business_name, contact_name, email, phone, specialties, resource_type, status, emergency_available, hourly_rate, notes, created_at, updated_at'
 			)
 			.eq('organization_id', params.id)
 			.order('business_name'),
@@ -713,6 +718,8 @@ export const actions = {
 			.eq('organization_id', params.id)
 			.maybeSingle();
 		if (!space) return fail(404, { message: 'The selected rentable space was not found.' });
+		if (space.status !== 'vacant')
+			return fail(409, { message: 'Choose a vacant rentable space. Occupied, reserved, and inactive spaces cannot be assigned to a new tenant.' });
 		const { data: existingTenancy } = await locals.supabase
 			.from('tenancies')
 			.select('id')
@@ -1645,7 +1652,7 @@ export const actions = {
 			.update({
 				status: ['reported', 'triage'].includes(task.status) ? 'assigned' : task.status,
 				scheduled_for: scheduledFor,
-				assigned_person_id: value(form, 'assigned_person_id') || null,
+				assigned_person_id: null,
 				vendor_id: value(form, 'vendor_id') || null
 			})
 			.eq('id', requestId)
@@ -1737,7 +1744,7 @@ export const actions = {
 				status,
 				category,
 				priority,
-				assigned_person_id: value(form, 'assigned_person_id') || null,
+				assigned_person_id: null,
 				vendor_id: value(form, 'vendor_id') || null,
 				scheduled_for: value(form, 'scheduled_for') || null,
 				estimated_cost: numberOrNull(form.get('estimated_cost')),
@@ -1839,11 +1846,16 @@ export const actions = {
 		if (!access) return fail(403, { message: 'Maintenance or manager access is required.' });
 		const form = await request.formData();
 		const businessName = value(form, 'business_name');
+		const resourceType = value(form, 'resource_type') || 'external';
 		if (!businessName) return fail(400, { message: 'Enter the vendor or contractor name.' });
-		const specialties = value(form, 'specialties')
-			.split(',')
+		if (!['internal', 'external'].includes(resourceType))
+			return fail(400, { message: 'Choose whether this is an internal or external resource.' });
+		const specialties = form
+			.getAll('specialties')
+			.flatMap((item) => String(item).split(','))
 			.map((item) => item.trim())
 			.filter(Boolean)
+			.filter((item) => maintenanceCategories.includes(item))
 			.slice(0, 12);
 		const { error: insertError } = await locals.supabase.from('maintenance_vendors').insert({
 			organization_id: params.id,
@@ -1852,13 +1864,14 @@ export const actions = {
 			email: value(form, 'email') || null,
 			phone: value(form, 'phone') || null,
 			specialties,
+			resource_type: resourceType,
 			status: 'active',
 			emergency_available: form.has('emergency_available'),
 			hourly_rate: numberOrNull(form.get('hourly_rate')),
 			notes: value(form, 'notes') || null
 		});
 		if (insertError) return fail(400, { message: insertError.message });
-		return { success: true, message: `${businessName} was added to the contractor directory.` };
+		return { success: true, message: `${businessName} was added to the maintenance resource directory.` };
 	},
 	updateMaintenanceVendor: async ({ request, locals, params }) => {
 		const access = await getMaintenanceAccess(locals, params.id);
@@ -2235,6 +2248,36 @@ export const actions = {
 			entityType: 'organization'
 		});
 		return { success: true, message: 'Workspace profile saved.' };
+	},
+	changePassword: async ({ request, locals, params }) => {
+		const access = await getManagedAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
+		const form = await request.formData();
+		const newPassword = value(form, 'new_password');
+		const confirmation = value(form, 'confirm_password');
+		if (newPassword.length < 8)
+			return fail(400, { message: 'Passwords must contain at least 8 characters.' });
+		if (newPassword !== confirmation)
+			return fail(400, { message: 'The passwords do not match.' });
+		const changedAt = new Date().toISOString();
+		const { error: authError } = await locals.supabase.auth.updateUser({
+			password: newPassword,
+			data: {
+				...(access.user.user_metadata ?? {}),
+				must_change_password: false,
+				password_changed_at: changedAt
+			}
+		});
+		if (authError) return fail(400, { message: authError.message });
+		await writeAuditLog(locals, {
+			actorUserId: access.user.id,
+			organizationId: params.id,
+			action: 'workspace_password_changed',
+			entityType: 'auth_user',
+			entityId: access.user.id,
+			metadata: { changed_at: changedAt }
+		});
+		return { success: true, message: 'Your password was changed successfully.' };
 	},
 	updateCollectionDefaults: async ({ request, locals, params }) => {
 		const access = await getManagedAccess(locals, params.id);
