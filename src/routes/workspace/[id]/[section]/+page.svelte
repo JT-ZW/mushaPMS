@@ -5,6 +5,7 @@
 	import LocationPicker from '$lib/components/LocationPicker.svelte';
 	import PortfolioMap from '$lib/components/PortfolioMap.svelte';
 	import MaintenanceWorkspace from '$lib/components/MaintenanceWorkspace.svelte';
+	import MaintenanceVendorDirectory from '$lib/components/MaintenanceVendorDirectory.svelte';
 	import FinanceWorkspace from '$lib/components/FinanceWorkspace.svelte';
 	import PeopleLeasesWorkspace from '$lib/components/PeopleLeasesWorkspace.svelte';
 	import ReportsWorkspace from '$lib/components/ReportsWorkspace.svelte';
@@ -49,7 +50,7 @@
 	role={data.membership.role}
 	supportMode={data.supportMode}
 >
-	{#if !['properties', 'new-property', 'finance', 'people', 'tenants', 'new-tenant', 'leases', 'documents', 'move-outs'].includes(data.sectionKey)}
+	{#if !['properties', 'new-property', 'finance', 'people', 'tenants', 'new-tenant', 'leases', 'documents', 'move-outs', 'vendors'].includes(data.sectionKey)}
 		<section class="heading">
 			<div>
 				<p class="eyebrow">{data.section.eyebrow}</p>
@@ -832,6 +833,8 @@
 				</div>
 			</section>
 		</div>
+	{:else if data.sectionKey === 'vendors'}
+		<MaintenanceVendorDirectory {data} {form} />
 	{:else if data.sectionKey === 'maintenance'}
 		<MaintenanceWorkspace {data} {form} />
 	{:else if data.sectionKey === 'support'}
@@ -1072,6 +1075,7 @@
 				</div>
 			</section>
 		</div>
+		<section class="panel security-panel"><div class="panel-heading"><div><p class="eyebrow">Account security</p><h2>Change your password</h2><p>Use a private password known only to you. Password changes are recorded in the workspace audit log.</p></div></div>{#if data.user?.user_metadata?.must_change_password}<div class="security-notice">This account is using a temporary password. Please choose a new one now.</div>{/if}{#if form?.message}<div class:failure={!form.success} class="security-notice">{form.message}</div>{/if}<form method="POST" action="?/changePassword" class="form-stack"><div class="form-grid two"><label>New password<input name="new_password" type="password" minlength="8" required autocomplete="new-password" placeholder="At least 8 characters" /></label><label>Confirm password<input name="confirm_password" type="password" minlength="8" required autocomplete="new-password" placeholder="Repeat the new password" /></label></div><button class="primary" type="submit">Update password <span>→</span></button></form></section>
 		<div class="section-grid settings-grid">
 			<section class="panel form-panel">
 				<div class="panel-heading">
@@ -1951,4 +1955,5 @@
 			width: 100%;
 		}
 	}
+.security-panel{background:#f5faef;border-color:#d9e9ca;margin-top:14px}.security-notice{background:#e8f5df;border-radius:8px;color:#39704c;font-size:11px;margin:12px 0;padding:10px}.security-notice.failure{background:#fff0eb;color:#a35545}
 </style>

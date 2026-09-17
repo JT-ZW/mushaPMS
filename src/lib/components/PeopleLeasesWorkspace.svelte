@@ -104,6 +104,9 @@
 	const tenantPeople = $derived(
 		data.people.filter((person: Person) => person.person_type === 'tenant')
 	);
+	const availableSpaces = $derived(
+		data.spaces.filter((space: Space) => space.status === 'vacant')
+	);
 	$effect(() => {
 		if (profileId) {
 			selectedPersonId = profileId;
@@ -403,9 +406,9 @@
 					</p>
 				</div>
 			</div>
-			{#if data.spaces.length === 0}<div class="empty">
-					<strong>Add a rentable space first.</strong>
-					<p>Tenants need a property room, unit, bed, office, shop, or listing.</p>
+			{#if availableSpaces.length === 0}<div class="empty">
+					<strong>{data.spaces.length ? 'No vacant rentable spaces available.' : 'Add a rentable space first.'}</strong>
+					<p>{data.spaces.length ? 'All current spaces are occupied or unavailable. Free a space before starting a new lease.' : 'Tenants need a property room, unit, bed, office, shop, or listing.'}</p>
 					<a class="secondary" href={resolve(`/workspace/${data.organization.id}/new-property`)}
 						>Add a property →</a
 					>
@@ -419,9 +422,7 @@
 								>Mobile number<input name="phone" type="tel" /></label
 							><label>ID / passport number<input name="id_number" /></label><label
 								>Date of birth<input name="date_of_birth" type="date" /></label
-							><label>Address<input name="address_line_1" /></label><label
-								>City<input name="city" /></label
-							><label>Country<input name="country" /></label>
+							>
 						</div>
 						<label
 							>Person notes<textarea
@@ -436,7 +437,7 @@
 							<label
 								>Rentable space<select name="space_id" required
 									><option value="">Choose space</option
-									>{#each data.spaces as space (space.id)}<option
+									>{#each availableSpaces as space (space.id)}<option
 											value={space.id}
 											disabled={space.status === 'occupied'}
 											>{propertyName(space.id)} · {space.name} · {space.kind}{space.status ===
@@ -682,15 +683,8 @@
 										name="id_number"
 										value={selectedPerson.id_number ?? ''}
 									/></label
-								><label
-									>Address<input
-										name="address_line_1"
-										value={selectedPerson.address_line_1 ?? ''}
-									/></label
-								><label>City<input name="city" value={selectedPerson.city ?? ''} /></label><label
-									>Country<input name="country" value={selectedPerson.country ?? ''} /></label
 								>
-							</div>
+						</div>
 							<label
 								>Notes<textarea name="notes" rows="2">{selectedPerson.notes ?? ''}</textarea></label
 							><button class="secondary" type="submit">Save profile</button>

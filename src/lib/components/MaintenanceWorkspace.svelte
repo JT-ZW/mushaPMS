@@ -56,6 +56,11 @@
 	let search = $state('');
 	let categoryFilter = $state('all');
 	let priorityFilter = $state('all');
+	let vendorFilter = $state('all');
+	let vendorSearch = $state('');
+	let vendorStatusFilter = $state('all');
+	let vendorSpecialtyFilter = $state('all');
+	let vendorPage = $state(1);
 	const openRequests = $derived(
 		data.maintenance.filter(
 			(item: { status: string }) => !['completed', 'closed'].includes(item.status)
@@ -91,6 +96,11 @@
 				b.created_at.localeCompare(a.created_at)
 		)
 	);
+	const requestBoardRequests = $derived(
+		visibleRequests.filter(
+			(item: { status: string }) => !['completed', 'closed'].includes(item.status)
+		)
+	);
 	const historyRequests = $derived(
 		visibleRequests.filter((item: { status: string }) =>
 			['completed', 'closed'].includes(item.status)
@@ -98,6 +108,32 @@
 	);
 	const activeVendors = $derived(
 		data.maintenanceVendors.filter((item: { status: string }) => item.status === 'active')
+	);
+	const visibleVendors = $derived(
+		data.maintenanceVendors.filter(
+			(item: { business_name: string; contact_name?: string | null; email?: string | null; resource_type?: string; status: string; specialties?: string[] }) => {
+				const needle = vendorSearch.trim().toLowerCase();
+				const text = `${item.business_name} ${item.contact_name ?? ''} ${item.email ?? ''}`.toLowerCase();
+				return (
+					(!needle || text.includes(needle)) &&
+					(vendorFilter === 'all' || (item.resource_type ?? 'external') === vendorFilter) &&
+					(vendorStatusFilter === 'all' || item.status === vendorStatusFilter) &&
+					(vendorSpecialtyFilter === 'all' || (item.specialties ?? []).includes(vendorSpecialtyFilter))
+				);
+			}
+		)
+	);
+	const specialtyOptions = $derived(
+		Array.from(
+			new Set(
+				data.maintenanceVendors.flatMap((item: { specialties?: string[] }) => item.specialties ?? [])
+			)
+		).sort()
+	);
+	const vendorPageCount = $derived(Math.max(1, Math.ceil(visibleVendors.length / 10)));
+	const effectiveVendorPage = $derived(Math.min(vendorPage, vendorPageCount));
+	const pagedVendors = $derived(
+		visibleVendors.slice((effectiveVendorPage - 1) * 10, effectiveVendorPage * 10)
 	);
 	const openReminders = $derived(
 		data.maintenanceReminders.filter(
@@ -169,11 +205,11 @@
 			<span class="nav-label">Maintenance workspace</span><strong>Keep every issue moving.</strong>
 		</div>
 		<div class="tabs">
-			{#each [['overview', 'Overview'], ['requests', 'Requests'], ['planned', 'Planned work'], ['vendors', 'Vendors'], ['preventive', 'Preventive'], ['sla', 'SLA watch'], ['history', 'History']] as tab (tab[0])}<button
+			{#each [['overview', 'Overview'], ['requests', 'Requests'], ['planned', 'Planned work'], ['vendors', 'Vendors'], ['preventive', 'Preventive'], ['sla', 'SLA watch'], ['history', 'History']] as tab (tab[0])}{#if tab[0] === 'vendors'}<a href={`/workspace/${data.organization.id}/vendors`}>{tab[1]}</a>{:else}<button
 					class:active={view === tab[0]}
 					type="button"
 					onclick={() => (view = tab[0])}>{tab[1]}</button
-				>{/each}
+				>{/if}{/each}
 		</div>
 	</nav>
 
@@ -306,8 +342,8 @@
 				</div>{/if}
 		</section>
 	{:else if view === 'requests'}
-		<div class="maintenance-grid">
-			<section class="panel form-panel">
+		<div class="maintenance-grid requests-layout">
+			{#if false}<section class="panel form-panel request-intake-panel" aria-hidden="true">
 				<div class="panel-heading">
 					<div>
 						<p class="eyebrow">New request</p>
@@ -380,7 +416,6 @@
 						>
 						<div class="form-grid two schedule-fields">
 							<label>Service target <small>Optional</small><input name="sla_due_at" type="datetime-local" /></label><label
-							><label
 								>Estimated cost ({data.organization.currency_code})<input
 									name="estimated_cost"
 									type="number"
@@ -391,14 +426,15 @@
 						</div>
 						<button class="primary" type="submit">Log maintenance request <span>→</span></button>
 					</form>{/if}
-			</section>
-			<section class="panel board-panel">
+			</section>{/if}
+			<section class="panel board-panel request-board-panel">
 				<div class="panel-heading">
 					<div>
 						<p class="eyebrow">Request board</p>
 						<h2>Reported issues</h2>
-						<p>This is the intake record. Assignment, scheduling, and progress are managed in Planned work.</p>
+						<p>Tenant and inspection reports arrive here as an intake register. Assignment, scheduling, and progress are managed in Planned work.</p>
 					</div>
+					<span class="count">{requestBoardRequests.length} open</span>
 				</div>
 				<div class="filters">
 					<input
@@ -417,10 +453,24 @@
 							>{/each}</select
 					>
 				</div>
-				{#if visibleRequests.length === 0}<div class="empty compact">
+				{#if requestBoardRequests.length > 0}<div class="request-table-wrap">
+					<table class="system-table request-table">
+						<thead><tr><th>Request</th><th>Location</th><th>Reported by</th><th>Reported</th><th>Category</th><th>Priority</th><th>Evidence</th></tr></thead>
+						<tbody>{#each requestBoardRequests as request (request.id)}<tr>
+							<td><strong>{request.title}</strong><small>{shortId(request.id)}</small>{#if request.description}<p>{request.description}</p>{/if}</td>
+							<td><strong>{propertyName(request.property_id)}</strong><small>{spaceName(request.space_id)}</small></td>
+							<td><strong>{request.reporter_person_id ? personName(request.reporter_person_id) : 'Not linked'}</strong><small>{label(sourceLabels, request.source)}</small></td>
+							<td>{dateLabel(request.reported_at ?? request.created_at)}</td>
+							<td><span class="tag category">{label(categories, request.category)}</span></td>
+							<td><span class="tag priority {request.priority}">{label(priorityLabels, request.priority)}</span></td>
+							<td>{attachmentsFor(request.id).length} file{attachmentsFor(request.id).length === 1 ? '' : 's'}</td>
+						</tr>{/each}</tbody>
+					</table>
+				</div>{/if}
+				{#if requestBoardRequests.length === 0}<div class="empty compact">
 						<strong>No matching requests.</strong>
-						<p>Try clearing a filter or log a new issue.</p>
-					</div>{:else}<div class="request-list">
+						<p>Try clearing a filter. New requests are submitted by tenants and inspections.</p>
+					</div>{:else if false}<div class="request-list">
 						{#each visibleRequests as request (request.id)}<article class="request-card">
 								<div class="request-top">
 									<div>
@@ -569,7 +619,7 @@
 				<div>
 					<p class="eyebrow">Planned work</p>
 					<h2>Plan and deliver work</h2>
-					<p>Assign an internal team member or contractor, set the planned start, then move each task through to completion.</p>
+					<p>Assign an internal resource or external contractor from the vendor directory, set the planned start, then move each task through to completion.</p>
 				</div>
 				<button class="secondary" type="button" onclick={() => (view = 'requests')}
 					>Manage requests <span>→</span></button
@@ -594,13 +644,12 @@
 							<span class="tag priority {request.priority}"
 								>{label(priorityLabels, request.priority)}</span
 							><span class="tag status {request.status}">{label(statusLabels, request.status)}</span
-							><span class="muted">{request.vendor_id ? vendorName(request.vendor_id) : personName(request.assigned_person_id)}</span>
+							><span class="muted">{request.vendor_id ? vendorName(request.vendor_id) : 'Unassigned'}</span>
 						</div>
 						<form method="POST" action="?/scheduleMaintenanceRequest" class="task-plan-form">
 							<input type="hidden" name="request_id" value={request.id} />
 							<label>Planned start<input name="scheduled_for" type="date" value={request.scheduled_for ?? ''} required /></label>
-							<label>Internal team<select name="assigned_person_id"><option value="">Not assigned</option>{#each data.people as person (person.id)}<option value={person.id} selected={request.assigned_person_id === person.id}>{person.first_name} {person.last_name}</option>{/each}</select></label>
-							<label>Contractor<select name="vendor_id"><option value="">No contractor</option>{#each activeVendors as vendor (vendor.id)}<option value={vendor.id} selected={request.vendor_id === vendor.id}>{vendor.business_name}</option>{/each}</select></label>
+							<label>Assigned resource<select name="vendor_id"><option value="">Not assigned</option>{#each activeVendors as vendor (vendor.id)}<option value={vendor.id} selected={request.vendor_id === vendor.id}>{vendor.business_name} · {vendor.resource_type === 'internal' ? 'Internal' : 'External'}</option>{/each}</select></label>
 							<button class="secondary" type="submit">Save plan</button>
 						</form>
 						{#if request.status === 'in_progress'}<form method="POST" action="?/finishMaintenanceTask" class="task-complete-form"><input type="hidden" name="request_id" value={request.id} /><input name="resolution_notes" placeholder="Work completed / resolution notes" /><input name="actual_cost" type="number" min="0" step="0.01" placeholder={`Actual cost (${data.organization.currency_code})`} /><button class="primary" type="submit">Finish task <span>→</span></button></form>{:else if request.status !== 'completed' && request.status !== 'closed'}<form method="POST" action="?/startMaintenanceTask" class="task-start-form"><input type="hidden" name="request_id" value={request.id} /><button class="primary" type="submit" disabled={!request.scheduled_for}>Start maintenance task <span>→</span></button>{#if !request.scheduled_for}<small>Set a planned start before starting this task.</small>{/if}</form>{/if}
@@ -612,9 +661,9 @@
 			<section class="panel form-panel">
 				<div class="panel-heading">
 					<div>
-						<p class="eyebrow">Contractor directory</p>
-						<h2>Add a vendor</h2>
-						<p>Keep trusted maintenance providers close to the work they support.</p>
+						<p class="eyebrow">Maintenance resources</p>
+						<h2>Add a vendor or team</h2>
+						<p>Keep internal crews and external contractors close to the work they support.</p>
 					</div>
 					<span class="count">{activeVendors.length} active</span>
 				</div>
@@ -629,16 +678,12 @@
 						><label>Contact person<input name="contact_name" placeholder="Primary contact" /></label
 						>
 					</div>
+					<label>Resource type<select name="resource_type"><option value="internal">Internal maintenance team</option><option value="external" selected>External vendor / contractor</option></select></label>
 					<div class="form-grid two">
 						<label>Email<input name="email" type="email" placeholder="ops@contractor.com" /></label
 						><label>Phone<input name="phone" placeholder="+263 7…" /></label>
 					</div>
-					<label
-						>Specialties <small>Separate with commas</small><input
-							name="specialties"
-							placeholder="Plumbing, water pumps, geysers"
-						/></label
-					>
+					<fieldset class="vendor-specialty-fieldset"><legend>Specialties</legend><div class="vendor-category-grid">{#each Object.entries(categories) as [key, label] (key)}<label class="checkbox-label"><input name="specialties" type="checkbox" value={key} /> {label}</label>{/each}</div></fieldset>
 					<div class="form-grid two">
 						<label
 							>Hourly rate ({data.organization.currency_code})<input
@@ -658,22 +703,42 @@
 							placeholder="Access instructions, warranty terms, preferred payment process"
 						></textarea></label
 					>
-					<button class="primary" type="submit">Add contractor <span>→</span></button>
+					<button class="primary" type="submit">Add maintenance resource <span>→</span></button>
 				</form>
 			</section>
 			<section class="panel">
 				<div class="panel-heading">
 					<div>
-						<p class="eyebrow">Trusted providers</p>
-						<h2>Vendor directory</h2>
-						<p>Assign an active vendor directly from any request.</p>
+						<p class="eyebrow">Resource directory</p>
+						<h2>Vendors and internal team</h2>
+						<p>Assign an active maintenance resource from Planned work.</p>
 					</div>
 				</div>
-				{#if data.maintenanceVendors.length === 0}<div class="empty compact">
-						<strong>No vendors yet.</strong>
-						<p>Add a contractor to make assignment easier.</p>
-					</div>{:else}<div class="vendor-list">
-						{#each data.maintenanceVendors as vendor (vendor.id)}<article class="vendor-row">
+				<div class="filters vendor-filters">
+					<input aria-label="Search maintenance resources" placeholder="Search resources" bind:value={vendorSearch} oninput={() => (vendorPage = 1)} />
+					<select aria-label="Filter resource type" bind:value={vendorFilter} onchange={() => (vendorPage = 1)}><option value="all">All resources</option><option value="internal">Internal team</option><option value="external">External vendors</option></select>
+					<select aria-label="Filter resource status" bind:value={vendorStatusFilter} onchange={() => (vendorPage = 1)}><option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select>
+					<select aria-label="Filter specialty" bind:value={vendorSpecialtyFilter} onchange={() => (vendorPage = 1)}><option value="all">All specialties</option>{#each specialtyOptions as specialty (specialty)}<option value={specialty}>{specialty}</option>{/each}</select>
+				</div>
+				{#if visibleVendors.length > 0}<div class="vendor-table-wrap">
+					<table class="system-table vendor-table">
+						<thead><tr><th>Resource</th><th>Type</th><th>Specialties</th><th>Contact</th><th>Status</th><th>Actions</th></tr></thead>
+						<tbody>{#each pagedVendors as vendor (vendor.id)}<tr>
+							<td><strong>{vendor.business_name}</strong><small>{vendor.contact_name || 'No contact name'}</small></td>
+							<td><span class="tag resource-type">{vendor.resource_type === 'internal' ? 'Internal team' : 'External vendor'}</span></td>
+							<td>{(vendor.specialties ?? []).join(', ') || 'General maintenance'}</td>
+							<td>{vendor.phone || vendor.email || 'No contact details'}</td>
+							<td><span class="tag status">{vendor.status === 'active' ? 'Active' : 'Inactive'}</span>{#if vendor.emergency_available}<small class="table-note">Emergency ready</small>{/if}</td>
+							<td><form method="POST" action="?/updateMaintenanceVendor" class="vendor-status-form"><input type="hidden" name="vendor_id" value={vendor.id} /><select name="status" aria-label={`Status for ${vendor.business_name}`}><option value="active" selected={vendor.status === 'active'}>Active</option><option value="inactive" selected={vendor.status === 'inactive'}>Inactive</option></select><button class="text-link" type="submit">Save</button></form></td>
+						</tr>{/each}</tbody>
+					</table>
+					<div class="pagination"><small>Showing {(effectiveVendorPage - 1) * 10 + 1}–{Math.min(effectiveVendorPage * 10, visibleVendors.length)} of {visibleVendors.length}</small><div><button class="secondary" type="button" disabled={effectiveVendorPage === 1} onclick={() => (vendorPage = Math.max(1, effectiveVendorPage - 1))}>Previous</button><span>Page {effectiveVendorPage} of {vendorPageCount}</span><button class="secondary" type="button" disabled={effectiveVendorPage === vendorPageCount} onclick={() => (vendorPage = Math.min(vendorPageCount, effectiveVendorPage + 1))}>Next</button></div></div>
+				</div>{/if}
+				{#if visibleVendors.length === 0}<div class="empty compact">
+						<strong>{data.maintenanceVendors.length === 0 ? 'No maintenance resources yet.' : 'No resources match these filters.'}</strong>
+						<p>{data.maintenanceVendors.length === 0 ? 'Add an internal team or external contractor to make assignment easier.' : 'Try clearing a filter or searching for another resource.'}</p>
+					</div>{:else}<div class="vendor-list resource-directory-old">
+						{#each visibleVendors as vendor (vendor.id)}<article class="vendor-row">
 								<div class="vendor-mark">{vendor.business_name.slice(0, 1).toUpperCase()}</div>
 								<div>
 									<strong>{vendor.business_name}</strong><small
@@ -687,6 +752,7 @@
 									</div>
 								</div>
 								<div class="vendor-side">
+									<span class="tag resource-type">{vendor.resource_type === 'internal' ? 'Internal team' : 'External vendor'}</span>
 									{#if vendor.emergency_available}<span class="tag status">Emergency ready</span
 										>{/if}
 									<form method="POST" action="?/updateMaintenanceVendor">
@@ -992,7 +1058,8 @@
 		flex-wrap: wrap;
 		gap: 5px;
 	}
-	.tabs button {
+	.tabs button,
+	.tabs a {
 		border: 0;
 		border-radius: 8px;
 		background: transparent;
@@ -1002,6 +1069,7 @@
 		font-size: 12px;
 		font-weight: 700;
 		padding: 10px 12px;
+		text-decoration: none;
 	}
 	.tabs button.active {
 		background: #0c5147;
@@ -1331,7 +1399,6 @@
 		min-width: 0;
 		max-width: 100%;
 	}
-	.schedule-fields input[type='date'],
 	.schedule-fields input[type='datetime-local'] {
 		font-size: 11px;
 		padding-left: 8px;
@@ -1372,9 +1439,150 @@
 		gap: 8px;
 		margin-bottom: 13px;
 	}
+	.vendor-filters {
+		grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(130px, 0.8fr));
+	}
+	.vendor-table-wrap {
+		overflow-x: auto;
+		border: 1px solid #e3ede4;
+		border-radius: 11px;
+	}
+	.vendor-table {
+		width: 100%;
+		min-width: 780px;
+		border-collapse: collapse;
+		text-align: left;
+	}
+	.vendor-table th {
+		background: #f6faf4;
+		color: #789287;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		padding: 12px 14px;
+		text-transform: uppercase;
+	}
+	.vendor-table td {
+		border-top: 1px solid #edf2ed;
+		color: #567768;
+		font-size: 11px;
+		padding: 12px 14px;
+		vertical-align: middle;
+	}
+	.vendor-table td strong,
+	.vendor-table td small {
+		display: block;
+	}
+	.vendor-table td strong {
+		color: #245442;
+		font-size: 12px;
+	}
+	.vendor-table td small {
+		color: #92a59b;
+		font-size: 10px;
+		margin-top: 3px;
+	}
+	.table-note {
+		color: #789287 !important;
+		font-size: 9px !important;
+	}
+	.vendor-status-form {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+	}
+	.vendor-status-form select {
+		min-width: 90px;
+		padding: 7px 8px;
+	}
+	.pagination {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		margin-top: 12px;
+	}
+	.pagination > small {
+		color: #8a9f94;
+		font-size: 10px;
+	}
+	.pagination > div {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+	.pagination span {
+		color: #587868;
+		font-size: 10px;
+		white-space: nowrap;
+	}
+	.pagination button {
+		padding: 7px 10px;
+	}
+	.resource-directory-old {
+		display: none;
+	}
+	.tag.resource-type {
+		background: #edf5e4;
+		color: #4b765c;
+	}
 	.request-list {
 		display: grid;
 		gap: 10px;
+	}
+	.requests-layout {
+		display: block;
+	}
+	.request-intake-panel,
+	.request-board-panel .request-list {
+		display: none;
+	}
+	.request-table-wrap {
+		overflow-x: auto;
+		border: 1px solid #e3ede4;
+		border-radius: 11px;
+	}
+	.request-table {
+		width: 100%;
+		min-width: 860px;
+		border-collapse: collapse;
+		text-align: left;
+	}
+	.request-table th {
+		background: #f6faf4;
+		color: #789287;
+		font-size: 10px;
+		font-weight: 800;
+		letter-spacing: 0.08em;
+		padding: 12px 14px;
+		text-transform: uppercase;
+	}
+	.request-table td {
+		border-top: 1px solid #edf2ed;
+		color: #567768;
+		font-size: 12px;
+		padding: 13px 14px;
+		vertical-align: top;
+	}
+	.request-table td strong,
+	.request-table td small {
+		display: block;
+	}
+	.request-table td strong {
+		color: #245442;
+		font-size: 12px;
+	}
+	.request-table td small {
+		color: #92a59b;
+		font-size: 10px;
+		margin-top: 4px;
+	}
+	.request-table td p {
+		color: #789287;
+		font-size: 11px;
+		line-height: 1.45;
+		margin: 7px 0 0;
+		max-width: 260px;
 	}
 	.request-card {
 		border: 1px solid #e3ede4;
@@ -1676,6 +1884,25 @@
 		align-items: center;
 		gap: 8px;
 		padding-top: 22px;
+	}
+	.vendor-specialty-fieldset {
+		border: 1px solid #dce9df;
+		border-radius: 8px;
+		padding: 12px;
+	}
+	.vendor-specialty-fieldset legend {
+		color: #456b5c;
+		font-size: 11px;
+		font-weight: 800;
+		padding: 0 5px;
+	}
+	.vendor-category-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 7px;
+	}
+	.vendor-category-grid .checkbox-label {
+		padding-top: 0;
 	}
 	.checkbox-label input {
 		width: 16px;

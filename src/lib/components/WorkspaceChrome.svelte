@@ -29,6 +29,7 @@
 		{ key: 'people', label: 'People & leases', suffix: '/people' },
 		{ key: 'finance', label: 'Finance & collections', suffix: '/finance' },
 		{ key: 'maintenance', label: 'Maintenance', suffix: '/maintenance' },
+		{ key: 'vendors', label: 'Vendor directory', suffix: '/vendors' },
 		{ key: 'support', label: 'Support', suffix: '/support' },
 		{ key: 'reports', label: 'Reports', suffix: '/reports' },
 		{ key: 'setup', label: 'Organization setup', suffix: '/setup' },
