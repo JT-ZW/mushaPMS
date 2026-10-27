@@ -1,7 +1,7 @@
 <script lang="ts">
-	import MarketingHeader from '$lib/components/MarketingHeader.svelte';
-	import MarketingFooter from '$lib/components/MarketingFooter.svelte';
+	import MarketingShell from '$lib/components/MarketingShell.svelte';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 
 	type View =
 		| 'overview'
@@ -43,6 +43,11 @@
 		{ key: 'reports', label: 'Reports', icon: '↗' },
 		{ key: 'settings', label: 'Organization setup', icon: '⚙' }
 	];
+	$effect(() => {
+		const requested = page.url.searchParams.get('view');
+		const key = requested === 'new-property' ? 'setup' : requested;
+		if (key && nav.some((item) => item.key === key)) view = key as View;
+	});
 	const active = $derived(
 		properties.find((property) => property.name === selectedProperty) ?? properties[0]
 	);
@@ -56,397 +61,402 @@
 		content="Explore a frontend-only Musha PMS demo workspace."
 	/></svelte:head
 >
-<MarketingHeader />
-<main>
-	<div class="demo-intro">
-		<div>
-			<p>INTERACTIVE PRODUCT TOUR</p>
-			<h1>Take Musha for<br /><em>a walk.</em></h1>
-		</div>
-		<span
-			>This is a safe, frontend-only demo using fictional data. Click around and see how a property
-			team could run its day.</span
-		>
-	</div>
-	<section class="app-shell" aria-label="Interactive Musha demo workspace">
-		<aside>
-			<a class="demo-brand" href={resolve('/')}
-				><img src="/logo.png" alt="" /><span>Musha<small>Demo workspace</small></span></a
-			>
-			<p class="workspace-name">Mushonga<br />Properties</p>
-			<div class="nav">
-				{#each nav as item (item.key)}<button
-						class:active={view === item.key}
-						onclick={() => (view = item.key)}><i>{item.icon}</i>{item.label}</button
-					>{/each}
+<MarketingShell>
+	<main id="main-content">
+		<div class="demo-intro">
+			<div>
+				<p>INTERACTIVE PRODUCT TOUR</p>
+				<a class="dashboard-design-link" href={resolve('/demo/dashboard')}
+					>Explore the new dashboard ?</a
+				>
+				<h1>A closer look.<br /><em>A clearer day.</em></h1>
 			</div>
-			<div class="aside-foot"><span>Demo mode</span><small>All data is fictional</small></div>
-		</aside>
-		<div class="workspace">
-			<header class="work-header">
-				<div>
-					<p>
-						{view === 'overview'
-							? 'Good morning, Jeffrey'
-							: nav.find((item) => item.key === view)?.label}
-					</p>
-					<span
-						>{view === 'overview'
-							? 'Here is how Mushonga Properties is moving today.'
-							: 'Explore a working Musha module.'}</span
-					>
+			<span
+				>This is a safe, frontend-only demo using fictional data. Click around and see how a
+				property team could run its day.</span
+			>
+		</div>
+		<section class="app-shell" aria-label="Interactive Musha demo workspace">
+			<aside>
+				<a class="demo-brand" href={resolve('/')}
+					><img src="/logo.png" alt="" /><span>Musha<small>Demo workspace</small></span></a
+				>
+				<p class="workspace-name">Mushonga<br />Properties</p>
+				<div class="nav">
+					{#each nav as item (item.key)}<button
+							class:active={view === item.key}
+							onclick={() => (view = item.key)}><i>{item.icon}</i>{item.label}</button
+						>{/each}
 				</div>
-				<div class="demo-badge"><i></i> Interactive demo</div>
-			</header>
-			{#if view === 'overview'}
-				<section class="overview-view">
-					<div class="metrics">
-						<article>
-							<small>Collected this month</small><strong>{monthCollected}</strong><span
-								class:confirmed={collected}
-								>{collected ? 'New payment recorded' : '↑ 12.5% from last month'}</span
-							>
-						</article>
-						<article>
-							<small>Portfolio occupancy</small><strong>91<sup>%</sup></strong>
-							<div class="meter"><i></i></div>
-						</article>
-						<article>
-							<small>Open maintenance</small><strong>{openRequests}</strong><span
-								>{requestDone ? 'One request resolved' : 'Needs attention today'}</span
-							>
-						</article>
+				<div class="aside-foot"><span>Demo mode</span><small>All data is fictional</small></div>
+			</aside>
+			<div class="workspace">
+				<header class="work-header">
+					<div>
+						<p>
+							{view === 'overview'
+								? 'Good morning, Jeffrey'
+								: nav.find((item) => item.key === view)?.label}
+						</p>
+						<span
+							>{view === 'overview'
+								? 'Here is how Mushonga Properties is moving today.'
+								: 'Explore a working Musha module.'}</span
+						>
 					</div>
-					<div class="overview-grid">
-						<article class="chart-card">
-							<div class="card-head">
-								<span><small>Collections</small><strong>Monthly income</strong></span><button
-									onclick={() => (view = 'finance')}>View finance →</button
+					<div class="demo-badge"><i></i> Interactive demo</div>
+				</header>
+				{#if view === 'overview'}
+					<section class="overview-view">
+						<div class="metrics">
+							<article>
+								<small>Collected this month</small><strong>{monthCollected}</strong><span
+									class:confirmed={collected}
+									>{collected ? 'New payment recorded' : '↑ 12.5% from last month'}</span
 								>
-							</div>
-							<div class="bars">
-								{#each [42, 58, 49, 70, 61, 82, 92] as height, i (i)}<i
-										style={`height:${height}%`}
-										class:last={i === 6}
-									></i>{/each}
-							</div>
-							<div class="months">
-								<span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span
-								><span>Sep</span><span>Oct</span>
-							</div>
-						</article>
-						<article class="attention">
-							<div class="card-head">
-								<span
-									><small>Needs your attention</small><strong>{openRequests} things to move</strong
-									></span
-								><button onclick={() => (view = 'maintenance')}>See all →</button>
-							</div>
-							<button
-								class:done={requestDone}
-								class="request"
-								onclick={() => (requestDone = !requestDone)}
-								><i>{requestDone ? '✓' : '2'}</i><span
-									><b>{requestDone ? 'Plumbing visit completed' : 'Plumbing request'}</b><small
-										>Unit 04 · Mabel Court</small
-									></span
-								><em>{requestDone ? 'Reopen' : 'Mark done'}</em></button
-							>
-							<div class="renewal">
-								<i>1</i><span
-									><b>Lease renewal due</b><small>Acacia Place · 8 days left</small></span
+							</article>
+							<article>
+								<small>Portfolio occupancy</small><strong>91<sup>%</sup></strong>
+								<div class="meter"><i></i></div>
+							</article>
+							<article>
+								<small>Open maintenance</small><strong>{openRequests}</strong><span
+									>{requestDone ? 'One request resolved' : 'Needs attention today'}</span
 								>
-							</div>
-						</article>
-					</div>
-					<div class="property-summary">
-						<div class="card-head">
-							<span><small>Your properties</small><strong>Three places, one view</strong></span
-							><button onclick={() => (view = 'properties')}>Manage properties →</button>
+							</article>
 						</div>
-						<div class="property-row">
+						<div class="overview-grid">
+							<article class="chart-card">
+								<div class="card-head">
+									<span><small>Collections</small><strong>Monthly income</strong></span><button
+										onclick={() => (view = 'finance')}>View finance →</button
+									>
+								</div>
+								<div class="bars">
+									{#each [42, 58, 49, 70, 61, 82, 92] as height, i (i)}<i
+											style={`height:${height}%`}
+											class:last={i === 6}
+										></i>{/each}
+								</div>
+								<div class="months">
+									<span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span
+									><span>Sep</span><span>Oct</span>
+								</div>
+							</article>
+							<article class="attention">
+								<div class="card-head">
+									<span
+										><small>Needs your attention</small><strong
+											>{openRequests} things to move</strong
+										></span
+									><button onclick={() => (view = 'maintenance')}>See all →</button>
+								</div>
+								<button
+									class:done={requestDone}
+									class="request"
+									onclick={() => (requestDone = !requestDone)}
+									><i>{requestDone ? '✓' : '2'}</i><span
+										><b>{requestDone ? 'Plumbing visit completed' : 'Plumbing request'}</b><small
+											>Unit 04 · Mabel Court</small
+										></span
+									><em>{requestDone ? 'Reopen' : 'Mark done'}</em></button
+								>
+								<div class="renewal">
+									<i>1</i><span
+										><b>Lease renewal due</b><small>Acacia Place · 8 days left</small></span
+									>
+								</div>
+							</article>
+						</div>
+						<div class="property-summary">
+							<div class="card-head">
+								<span><small>Your properties</small><strong>Three places, one view</strong></span
+								><button onclick={() => (view = 'properties')}>Manage properties →</button>
+							</div>
+							<div class="property-row">
+								{#each properties as property (property.name)}<button
+										class:chosen={selectedProperty === property.name}
+										onclick={() => (selectedProperty = property.name)}
+										><i class={property.tone}></i><span
+											><b>{property.name}</b><small
+												>{property.units} units · {property.occupancy}% occupied</small
+											></span
+										><em>→</em></button
+									>{/each}
+							</div>
+						</div>
+					</section>
+				{:else if view === 'properties'}
+					<section class="module">
+						<div class="module-title">
+							<div>
+								<small>PROPERTY DIRECTORY</small>
+								<h2>Places you manage</h2>
+							</div>
+							<button class="add">+ Add property</button>
+						</div>
+						<div class="property-list">
 							{#each properties as property (property.name)}<button
 									class:chosen={selectedProperty === property.name}
 									onclick={() => (selectedProperty = property.name)}
 									><i class={property.tone}></i><span
-										><b>{property.name}</b><small
-											>{property.units} units · {property.occupancy}% occupied</small
-										></span
+										><b>{property.name}</b><small>{property.location}</small></span
+									><strong
+										>{property.occupancy}%<small>occupied · {property.units} units</small></strong
 									><em>→</em></button
 								>{/each}
 						</div>
-					</div>
-				</section>
-			{:else if view === 'properties'}
-				<section class="module">
-					<div class="module-title">
-						<div>
-							<small>PROPERTY DIRECTORY</small>
-							<h2>Places you manage</h2>
-						</div>
-						<button class="add">+ Add property</button>
-					</div>
-					<div class="property-list">
-						{#each properties as property (property.name)}<button
-								class:chosen={selectedProperty === property.name}
-								onclick={() => (selectedProperty = property.name)}
-								><i class={property.tone}></i><span
-									><b>{property.name}</b><small>{property.location}</small></span
-								><strong
-									>{property.occupancy}%<small>occupied · {property.units} units</small></strong
-								><em>→</em></button
-							>{/each}
-					</div>
-					<article class="property-detail">
-						<div>
-							<small>SELECTED PROPERTY</small>
-							<h3>{active.name}</h3>
-							<p>{active.location} · A well-kept residential community managed in Musha.</p>
-						</div>
-						<div><b>{active.units}</b><span>Total units</span></div>
-						<div>
-							<b>{Math.round((active.units * active.occupancy) / 100)}</b><span>Occupied</span>
-						</div>
-						<div>
-							<b>{active.units - Math.round((active.units * active.occupancy) / 100)}</b><span
-								>Available</span
-							>
-						</div>
-					</article>
-				</section>
-			{:else if view === 'setup'}
-				<section class="module">
-					<div class="module-title">
-						<div>
-							<small>PROPERTY REGISTRATION</small>
-							<h2>Add a property</h2>
-						</div>
-						<span class="step">Step 2 of 4</span>
-					</div>
-					<div class="setup-grid">
-						<article class="setup-form">
-							<label>Property name<input value="New property" /></label><label
-								>Property type<select
-									><option>Residential</option><option>Commercial</option><option
-										>Student accommodation</option
-									></select
-								></label
-							><label>Address<input value="Harare, Zimbabwe" /></label>
-							<div class="setup-actions">
-								<button onclick={() => (view = 'properties')}>Save sample property →</button><span
-									>This demo does not save real data.</span
+						<article class="property-detail">
+							<div>
+								<small>SELECTED PROPERTY</small>
+								<h3>{active.name}</h3>
+								<p>{active.location} · A well-kept residential community managed in Musha.</p>
+							</div>
+							<div><b>{active.units}</b><span>Total units</span></div>
+							<div>
+								<b>{Math.round((active.units * active.occupancy) / 100)}</b><span>Occupied</span>
+							</div>
+							<div>
+								<b>{active.units - Math.round((active.units * active.occupancy) / 100)}</b><span
+									>Available</span
 								>
 							</div>
 						</article>
-						<article class="setup-steps">
-							<small>REGISTRATION FLOW</small>
-							<p class="complete"><i>✓</i> Choose property type</p>
-							<p class="current"><i>2</i> Add location details</p>
-							<p><i>3</i> Add spaces and rental model</p>
-							<p><i>4</i> Review and activate</p>
-						</article>
-					</div>
-				</section>
-			{:else if view === 'people'}
-				<section class="module">
-					<div class="module-title">
-						<div>
-							<small>PEOPLE & LEASES</small>
-							<h2>Everyone in the picture</h2>
+					</section>
+				{:else if view === 'setup'}
+					<section class="module">
+						<div class="module-title">
+							<div>
+								<small>PROPERTY REGISTRATION</small>
+								<h2>Add a property</h2>
+							</div>
+							<span class="step">Step 2 of 4</span>
 						</div>
-						<button class="add">+ Invite person</button>
-					</div>
-					<div class="table">
-						<div class="table-head">
-							<span>Resident</span><span>Home</span><span>Lease status</span><span>Balance</span>
+						<div class="setup-grid">
+							<article class="setup-form">
+								<label>Property name<input value="New property" /></label><label
+									>Property type<select
+										><option>Residential</option><option>Commercial</option><option
+											>Student accommodation</option
+										></select
+									></label
+								><label>Address<input value="Harare, Zimbabwe" /></label>
+								<div class="setup-actions">
+									<button onclick={() => (view = 'properties')}>Save sample property →</button><span
+										>This demo does not save real data.</span
+									>
+								</div>
+							</article>
+							<article class="setup-steps">
+								<small>REGISTRATION FLOW</small>
+								<p class="complete"><i>✓</i> Choose property type</p>
+								<p class="current"><i>2</i> Add location details</p>
+								<p><i>3</i> Add spaces and rental model</p>
+								<p><i>4</i> Review and activate</p>
+							</article>
 						</div>
-						{#each [['Tariro Moyo', 'Mabel Court · Unit 04', 'Active', 'Paid'], ['Kudzai Ncube', 'Acacia Place · Unit 07', 'Renewal due', 'Due 08 Oct'], ['Peter Dube', 'The Grove · House 02', 'Active', 'Paid']] as person (person[0])}<div
-								class="table-row"
-							>
-								<span><i>{person[0].slice(0, 1)}</i><b>{person[0]}</b></span><span>{person[1]}</span
-								><span class:warning={person[2] === 'Renewal due'}>{person[2]}</span><span
-									class:due={person[3] !== 'Paid'}>{person[3]}</span
+					</section>
+				{:else if view === 'people'}
+					<section class="module">
+						<div class="module-title">
+							<div>
+								<small>PEOPLE & LEASES</small>
+								<h2>Everyone in the picture</h2>
+							</div>
+							<button class="add">+ Invite person</button>
+						</div>
+						<div class="table">
+							<div class="table-head">
+								<span>Resident</span><span>Home</span><span>Lease status</span><span>Balance</span>
+							</div>
+							{#each [['Tariro Moyo', 'Mabel Court · Unit 04', 'Active', 'Paid'], ['Kudzai Ncube', 'Acacia Place · Unit 07', 'Renewal due', 'Due 08 Oct'], ['Peter Dube', 'The Grove · House 02', 'Active', 'Paid']] as person (person[0])}<div
+									class="table-row"
 								>
-							</div>{/each}
-					</div>
-				</section>
-			{:else if view === 'finance'}
-				<section class="module">
-					<div class="module-title">
-						<div>
-							<small>FINANCE</small>
-							<h2>Collections with context</h2>
+									<span><i>{person[0].slice(0, 1)}</i><b>{person[0]}</b></span><span
+										>{person[1]}</span
+									><span class:warning={person[2] === 'Renewal due'}>{person[2]}</span><span
+										class:due={person[3] !== 'Paid'}>{person[3]}</span
+									>
+								</div>{/each}
 						</div>
-						<button class="add" onclick={() => (collected = true)}>+ Record payment</button>
-					</div>
-					<div class="finance-grid">
-						<article>
-							<small>Collected this month</small><strong>{monthCollected}</strong><span
-								>{collected
-									? 'Payment from Tariro Moyo added'
-									: '91% of expected collections'}</span
-							>
-						</article>
-						<article>
-							<small>Outstanding</small><strong>$1,740</strong><span
-								>3 residents need a follow-up</span
-							>
-						</article>
-						<article>
-							<small>Next collection run</small><strong>28 Oct</strong><span
-								>Rent invoices will be prepared</span
-							>
-						</article>
-					</div>
-					<div class="invoice">
-						<div>
-							<i>↑</i><span
-								><b>{collected ? 'Payment successfully recorded' : 'Tariro Moyo · Unit 04'}</b
-								><small
+					</section>
+				{:else if view === 'finance'}
+					<section class="module">
+						<div class="module-title">
+							<div>
+								<small>FINANCE</small>
+								<h2>Collections with context</h2>
+							</div>
+							<button class="add" onclick={() => (collected = true)}>+ Record payment</button>
+						</div>
+						<div class="finance-grid">
+							<article>
+								<small>Collected this month</small><strong>{monthCollected}</strong><span
 									>{collected
-										? 'The collection dashboard has been updated.'
-										: 'Rent payment of $550 is awaiting collection.'}</small
-								></span
+										? 'Payment from Tariro Moyo added'
+										: '91% of expected collections'}</span
+								>
+							</article>
+							<article>
+								<small>Outstanding</small><strong>$1,740</strong><span
+									>3 residents need a follow-up</span
+								>
+							</article>
+							<article>
+								<small>Next collection run</small><strong>28 Oct</strong><span
+									>Rent invoices will be prepared</span
+								>
+							</article>
+						</div>
+						<div class="invoice">
+							<div>
+								<i>↑</i><span
+									><b>{collected ? 'Payment successfully recorded' : 'Tariro Moyo · Unit 04'}</b
+									><small
+										>{collected
+											? 'The collection dashboard has been updated.'
+											: 'Rent payment of $550 is awaiting collection.'}</small
+									></span
+								>
+							</div>
+							<button onclick={() => (collected = !collected)}
+								>{collected ? 'Undo sample payment' : 'Record $550 payment'}</button
 							>
 						</div>
-						<button onclick={() => (collected = !collected)}
-							>{collected ? 'Undo sample payment' : 'Record $550 payment'}</button
-						>
-					</div>
-				</section>
-			{:else if view === 'reports'}
-				<section class="module">
-					<div class="module-title">
-						<div>
-							<small>REPORTING DESK</small>
-							<h2>Portfolio reporting</h2>
+					</section>
+				{:else if view === 'reports'}
+					<section class="module">
+						<div class="module-title">
+							<div>
+								<small>REPORTING DESK</small>
+								<h2>Portfolio reporting</h2>
+							</div>
+							<button class="add">Export report</button>
 						</div>
-						<button class="add">Export report</button>
-					</div>
-					<div class="report-grid">
-						<article>
-							<small>OCCUPANCY</small><strong>91%</strong>
-							<div class="report-bar"><i style="width:91%"></i></div>
-							<span>24 of 26 spaces occupied</span>
-						</article>
-						<article>
-							<small>COLLECTION RATE</small><strong>{collected ? '94%' : '91%'}</strong>
-							<div class="report-bar"><i style={`width:${collected ? 94 : 91}%`}></i></div>
-							<span>October income performance</span>
-						</article>
-						<article>
-							<small>MAINTENANCE SLA</small><strong>88%</strong>
-							<div class="report-bar"><i style="width:88%"></i></div>
-							<span>Requests actioned on time</span>
-						</article>
-					</div>
-					<div class="report-list">
-						<div>
-							<span
-								><i>▣</i><b>Rent roll</b><small>Current leases, rent amounts and balances</small
-								></span
-							><button>Open →</button>
+						<div class="report-grid">
+							<article>
+								<small>OCCUPANCY</small><strong>91%</strong>
+								<div class="report-bar"><i style="width:91%"></i></div>
+								<span>24 of 26 spaces occupied</span>
+							</article>
+							<article>
+								<small>COLLECTION RATE</small><strong>{collected ? '94%' : '91%'}</strong>
+								<div class="report-bar"><i style={`width:${collected ? 94 : 91}%`}></i></div>
+								<span>October income performance</span>
+							</article>
+							<article>
+								<small>MAINTENANCE SLA</small><strong>88%</strong>
+								<div class="report-bar"><i style="width:88%"></i></div>
+								<span>Requests actioned on time</span>
+							</article>
 						</div>
-						<div>
-							<span
-								><i>◫</i><b>Collections report</b><small
-									>Charges, payments and outstanding balances</small
-								></span
-							><button>Open →</button>
+						<div class="report-list">
+							<div>
+								<span
+									><i>▣</i><b>Rent roll</b><small>Current leases, rent amounts and balances</small
+									></span
+								><button>Open →</button>
+							</div>
+							<div>
+								<span
+									><i>◫</i><b>Collections report</b><small
+										>Charges, payments and outstanding balances</small
+									></span
+								><button>Open →</button>
+							</div>
+							<div>
+								<span
+									><i>⌁</i><b>Maintenance performance</b><small
+										>Open work, vendors and response times</small
+									></span
+								><button>Open →</button>
+							</div>
 						</div>
-						<div>
-							<span
-								><i>⌁</i><b>Maintenance performance</b><small
-									>Open work, vendors and response times</small
-								></span
-							><button>Open →</button>
+					</section>
+				{:else if view === 'settings'}
+					<section class="module">
+						<div class="module-title">
+							<div>
+								<small>ORGANIZATION SETUP</small>
+								<h2>Keep your Musha in shape</h2>
+							</div>
+							<button class="add">Save changes</button>
 						</div>
-					</div>
-				</section>
-			{:else if view === 'settings'}
-				<section class="module">
-					<div class="module-title">
-						<div>
-							<small>ORGANIZATION SETUP</small>
-							<h2>Keep your Musha in shape</h2>
+						<div class="settings-grid">
+							<article>
+								<small>ORGANIZATION PROFILE</small><label
+									>Organization name<input value="Mushonga Properties" /></label
+								><label
+									>Default currency<select
+										><option>USD — United States Dollar</option><option>ZIG — Zimbabwe Gold</option
+										></select
+									></label
+								>
+							</article>
+							<article>
+								<small>OPERATING DEFAULTS</small><label>Invoice due days<input value="7" /></label
+								><label
+									>Notice period<select><option>30 days</option><option>60 days</option></select
+									></label
+								>
+							</article>
+							<article class="modules">
+								<small>ENABLED MODULES</small>
+								<p><i>✓</i> Residential</p>
+								<p><i>✓</i> Finance & collections</p>
+								<p><i>✓</i> Maintenance</p>
+							</article>
 						</div>
-						<button class="add">Save changes</button>
-					</div>
-					<div class="settings-grid">
-						<article>
-							<small>ORGANIZATION PROFILE</small><label
-								>Organization name<input value="Mushonga Properties" /></label
-							><label
-								>Default currency<select
-									><option>USD — United States Dollar</option><option>ZIG — Zimbabwe Gold</option
-									></select
-								></label
+					</section>
+				{:else}
+					<section class="module">
+						<div class="module-title">
+							<div>
+								<small>MAINTENANCE</small>
+								<h2>Keep the small things moving</h2>
+							</div>
+							<button class="add">+ New request</button>
+						</div>
+						<div class="maintenance-grid">
+							<article>
+								<small>OPEN REQUESTS</small><strong>{openRequests}</strong><span
+									>Across two properties</span
+								>
+							</article>
+							<article>
+								<small>AVERAGE RESPONSE</small><strong>3h 40m</strong><span
+									>Within your 24h target</span
+								>
+							</article>
+						</div>
+						<div class="tickets">
+							<button class:done={requestDone} onclick={() => (requestDone = !requestDone)}
+								><i>{requestDone ? '✓' : '↗'}</i><span
+									><b>{requestDone ? 'Plumbing visit completed' : 'Leaking kitchen pipe'}</b><small
+										>Mabel Court · Unit 04 · Reported 2h ago</small
+									></span
+								><em>{requestDone ? 'Completed' : 'In progress'}</em></button
+							><button
+								><i class="warm">!</i><span
+									><b>Replace corridor light</b><small
+										>Acacia Place · Block B · Reported yesterday</small
+									></span
+								><em>Assigned</em></button
 							>
-						</article>
-						<article>
-							<small>OPERATING DEFAULTS</small><label>Invoice due days<input value="7" /></label
-							><label
-								>Notice period<select><option>30 days</option><option>60 days</option></select
-								></label
-							>
-						</article>
-						<article class="modules">
-							<small>ENABLED MODULES</small>
-							<p><i>✓</i> Residential</p>
-							<p><i>✓</i> Finance & collections</p>
-							<p><i>✓</i> Maintenance</p>
-						</article>
-					</div>
-				</section>
-			{:else}
-				<section class="module">
-					<div class="module-title">
-						<div>
-							<small>MAINTENANCE</small>
-							<h2>Keep the small things moving</h2>
 						</div>
-						<button class="add">+ New request</button>
-					</div>
-					<div class="maintenance-grid">
-						<article>
-							<small>OPEN REQUESTS</small><strong>{openRequests}</strong><span
-								>Across two properties</span
-							>
-						</article>
-						<article>
-							<small>AVERAGE RESPONSE</small><strong>3h 40m</strong><span
-								>Within your 24h target</span
-							>
-						</article>
-					</div>
-					<div class="tickets">
-						<button class:done={requestDone} onclick={() => (requestDone = !requestDone)}
-							><i>{requestDone ? '✓' : '↗'}</i><span
-								><b>{requestDone ? 'Plumbing visit completed' : 'Leaking kitchen pipe'}</b><small
-									>Mabel Court · Unit 04 · Reported 2h ago</small
-								></span
-							><em>{requestDone ? 'Completed' : 'In progress'}</em></button
-						><button
-							><i class="warm">!</i><span
-								><b>Replace corridor light</b><small
-									>Acacia Place · Block B · Reported yesterday</small
-								></span
-							><em>Assigned</em></button
-						>
-					</div>
-				</section>
-			{/if}
-		</div>
-	</section>
-	<section class="demo-cta">
-		<div>
-			<p>LIKE WHAT YOU SEE?</p>
-			<h2>Make it your<br /><em>own Musha.</em></h2>
-		</div>
-		<a href={resolve('/contact')}>Request beta access →</a>
-	</section>
-</main>
-<MarketingFooter />
+					</section>
+				{/if}
+			</div>
+		</section>
+		<section class="demo-cta">
+			<div>
+				<p>LIKE WHAT YOU SEE?</p>
+				<h2>Make it your<br /><em>own Musha.</em></h2>
+			</div>
+			<a href={resolve('/contact')}>Request beta access →</a>
+		</section>
+	</main>
+</MarketingShell>
 
 <style>
 	:global(body) {
@@ -464,9 +474,7 @@
 		justify-content: space-between;
 		gap: 40px;
 		padding: 78px clamp(24px, 8vw, 150px) 48px;
-		background:
-			radial-gradient(circle at 84% 15%, #f5d3a2, transparent 21%),
-			linear-gradient(120deg, #eef4e8, #faf7f0);
+		background: #f5f3ed;
 	}
 	.demo-intro p,
 	.module-title small,
@@ -479,8 +487,8 @@
 	.demo-intro h1 {
 		margin: 16px 0 0;
 		font-size: clamp(48px, 6vw, 78px);
-		line-height: 0.87;
-		letter-spacing: -0.095em;
+		line-height: 1.05;
+		letter-spacing: -0.055em;
 	}
 	.demo-intro em,
 	.demo-cta em {
@@ -1459,5 +1467,20 @@
 		.report-list button {
 			padding-top: 5px;
 		}
+	}
+	.demo-intro h1 {
+		font-weight: 400;
+	}
+	.demo-intro em {
+		font-family: Georgia, serif;
+		font-style: italic;
+		color: #203d32;
+	}
+	.dashboard-design-link {
+		display: inline-block;
+		color: #4d6941;
+		font-size: 12px;
+		margin-bottom: 12px;
+		text-underline-offset: 4px;
 	}
 </style>

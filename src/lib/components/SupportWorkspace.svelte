@@ -1,4 +1,6 @@
-<script lang="ts">
+﻿<script lang="ts">
+	import { enhance } from '$app/forms';
+	import { workspaceSubmit } from '$lib/forms/workspace-submit';
 	type Ticket = {
 		id: string;
 		subject: string;
@@ -18,94 +20,287 @@
 		file_size: number | null;
 		url: string | null;
 	};
-
-	let { tickets, attachments, form }: { tickets: Ticket[]; attachments: Attachment[]; form?: { success?: boolean; message?: string } | null } = $props();
-	const titleCase = (value: string) => value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
-	const attachmentsFor = (ticketId: string) => attachments.filter((attachment) => attachment.ticket_id === ticketId);
+	let { tickets, attachments, form } = $props<{
+		tickets: Ticket[];
+		attachments: Attachment[];
+		form?: { success?: boolean; message?: string } | null;
+	}>();
+	let composing = $state(false);
+	let search = $state('');
+	let focus = $state('open');
+	const open = $derived(
+		tickets.filter((ticket: Ticket) => !['closed', 'resolved'].includes(ticket.status))
+	);
+	const waiting = $derived(
+		tickets.filter((ticket: Ticket) => ticket.status === 'waiting_on_client')
+	);
+	const filtered = $derived(
+		tickets
+			.filter(
+				(ticket: Ticket) =>
+					`${ticket.subject} ${ticket.description} ${ticket.category}`
+						.toLowerCase()
+						.includes(search.toLowerCase()) &&
+					(focus === 'all' ||
+						(focus === 'open'
+							? !['closed', 'resolved'].includes(ticket.status)
+							: focus === 'done'
+								? ['closed', 'resolved'].includes(ticket.status)
+								: ticket.status === focus))
+			)
+			.sort((a: Ticket, b: Ticket) => b.updated_at.localeCompare(a.updated_at))
+	);
+	const label = (value: string) => value.replaceAll('_', ' ');
+	const attachmentsFor = (id: string) =>
+		attachments.filter((row: Attachment) => row.ticket_id === id);
 </script>
 
-<div class="support-grid">
-	<section class="support-panel request-panel">
+<!-- Attachment URLs are authenticated download links supplied by the server. -->
+<!-- eslint-disable svelte/no-navigation-without-resolve -->
+
+<div class="aligned-workspace support-workspace">
+	<div class="aligned-actions">
+		<div>
+			<p class="eyebrow">MUSHA SUPPORT</p>
+			<p class="aligned-description">
+				Keep a clear record of requests, progress and supporting evidence.
+			</p>
+		</div>
+		<button
+			class="primary"
+			type="button"
+			aria-expanded={composing}
+			aria-controls="support-composer"
+			onclick={() => (composing = !composing)}
+			>{composing ? 'Close request form' : '+ New support request'}</button
+		>
+	</div>
+	<div class="aligned-metrics">
+		<div>
+			<span>Open requests</span><strong>{open.length}</strong><small>Awaiting a resolution</small>
+		</div>
+		<div>
+			<span>Waiting on your team</span><strong>{waiting.length}</strong><small
+				>Review the request details</small
+			>
+		</div>
+		<div>
+			<span>Resolved / closed</span><strong>{tickets.length - open.length}</strong><small
+				>Retained in your support history</small
+			>
+		</div>
+	</div>
+	<section class="panel" id="support-composer" hidden={!composing}>
 		<div class="panel-heading">
 			<div>
-				<p class="eyebrow">New request</p>
+				<p class="eyebrow">NEW REQUEST</p>
 				<h2>How can we help?</h2>
-				<p>Send your request directly to the Musha support team.</p>
+				<p>Include the steps to reproduce an issue and the result you expected.</p>
 			</div>
-			<span class="plus">+</span>
 		</div>
-		<form method="POST" action="?/createSupportTicket" enctype="multipart/form-data">
-			<label>Subject<input name="subject" required maxlength="160" placeholder="e.g. Need help importing tenant balances" /></label>
-			<label>Request details<textarea name="description" required minlength="10" rows="5" placeholder="Describe the issue, relevant context, and what you need help with."></textarea></label>
-			<div class="fields">
-				<label>Category<select name="category"><option value="general">General</option><option value="access">Access</option><option value="billing">Billing</option><option value="setup">Setup</option><option value="maintenance">Maintenance</option><option value="data">Data & imports</option><option value="bug">Something is not working</option></select></label>
-				<label>Priority<select name="priority"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
+		{#if form?.message}<p class="feedback" role={form.success ? 'status' : 'alert'}>
+				{form.message}
+			</p>{/if}
+		<form
+			method="POST"
+			action="?/createSupportTicket"
+			enctype="multipart/form-data"
+			data-managed-feedback="true"
+			data-reset-on-success="true"
+			use:enhance={workspaceSubmit}
+			class="form-stack"
+		>
+			<label
+				>Subject<input
+					name="subject"
+					required
+					maxlength="160"
+					placeholder="A brief description of your request"
+				/></label
+			><label
+				>Request details<textarea
+					name="description"
+					required
+					minlength="10"
+					rows="5"
+					placeholder="What happened, where it happened, and what you need help with."
+				></textarea></label
+			>
+			<div class="form-grid two">
+				<label
+					>Category<select name="category"
+						><option value="general">General</option><option value="access">Access</option><option
+							value="billing">Billing</option
+						><option value="setup">Setup</option><option value="maintenance">Maintenance</option
+						><option value="data">Data & imports</option><option value="bug"
+							>Something is not working</option
+						></select
+					></label
+				><label
+					>Priority<select name="priority"
+						><option value="low">Low</option><option value="normal" selected>Normal</option><option
+							value="high">High</option
+						><option value="urgent">Urgent</option></select
+					></label
+				>
 			</div>
-			<label class="attachment-input"><span>Optional screenshots or files <small>JPG, PNG, WebP, or PDF · up to 5 files, 10 MB each</small></span><input name="attachments" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple /></label>
-			<button class="primary" type="submit">Send support ticket <span>→</span></button>
+			<label
+				>Optional screenshots or files <small
+					>JPG, PNG, WebP or PDF · up to 5 files, 10 MB each</small
+				><input
+					name="attachments"
+					type="file"
+					accept="image/jpeg,image/png,image/webp,application/pdf"
+					multiple
+				/></label
+			><button class="primary" type="submit">Send support request</button>
 		</form>
 	</section>
-
-	<section class="support-panel ticket-panel">
+	<div class="aligned-filters">
+		<label class="grow"
+			><span>Search requests</span><input
+				type="search"
+				bind:value={search}
+				placeholder="Subject, details or category"
+			/></label
+		><label
+			><span>Status</span><select bind:value={focus}
+				><option value="open">Open requests</option><option value="all">All requests</option><option
+					value="waiting_on_client">Waiting on your team</option
+				><option value="done">Resolved / closed</option></select
+			></label
+		><button
+			type="button"
+			onclick={() => {
+				search = '';
+				focus = 'all';
+			}}>Reset</button
+		>
+	</div>
+	<section class="panel">
 		<div class="panel-heading">
-			<div><p class="eyebrow">Your requests</p><h2>Support tickets</h2></div>
-			<span class="count">{tickets.length}</span>
-		</div>
-		{#if tickets.length === 0}
-			<div class="empty"><span>✓</span><strong>No support tickets yet</strong><p>When you contact Musha, you can track the request here.</p></div>
-		{:else}
-			<div class="ticket-list">
-				{#each tickets as ticket (ticket.id)}
-					<article class="ticket">
-						<div><div class="ticket-top"><strong>{ticket.subject}</strong><span class="priority {ticket.priority}">{ticket.priority}</span></div><p>{ticket.description}</p><small>{titleCase(ticket.category)} · Sent {new Date(ticket.created_at).toLocaleDateString()}</small>{#if attachmentsFor(ticket.id).length}<div class="attachments">{#each attachmentsFor(ticket.id) as attachment (attachment.id)}<a href={attachment.url ?? '#'} target="_blank" rel="noreferrer">{attachment.mime_type?.startsWith('image/') ? '▧' : '↗'} {attachment.file_name}</a>{/each}</div>{/if}</div>
-						<span class="status {ticket.status}">{titleCase(ticket.status)}</span>
-					</article>
-				{/each}
+			<div>
+				<p class="eyebrow">REQUEST REGISTER</p>
+				<h2>Your support history</h2>
 			</div>
-		{/if}
+			<span class="count">{filtered.length} requests</span>
+		</div>
+		<div class="support-tickets">
+			{#each filtered as ticket (ticket.id)}<details class="support-ticket">
+					<summary
+						><span
+							><strong>{ticket.subject}</strong><small
+								>{label(ticket.category)} · Updated {new Intl.DateTimeFormat('en', {
+									dateStyle: 'medium'
+								}).format(new Date(ticket.updated_at))}</small
+							></span
+						><span class="tag">{label(ticket.priority)}</span><span class="tag"
+							>{label(ticket.status)}</span
+						></summary
+					>
+					<div class="ticket-detail">
+						<p>{ticket.description}</p>
+						<small
+							>Reference #{ticket.id.slice(0, 8).toUpperCase()} · Sent {new Intl.DateTimeFormat(
+								'en',
+								{ dateStyle: 'medium' }
+							).format(new Date(ticket.created_at))}</small
+						>
+						<div class="support-attachments">
+							{#each attachmentsFor(ticket.id) as file (file.id)}{#if file.url}<a
+										href={file.url}
+										target="_blank"
+										rel="noreferrer">{file.file_name}</a
+									>{:else}<span>{file.file_name} · Unavailable</span>{/if}{/each}
+						</div>
+					</div>
+				</details>{:else}<div class="empty">
+					<strong
+						>{tickets.length ? 'No requests match this view.' : 'No support requests yet.'}</strong
+					>
+					<p>New requests and their progress will appear here.</p>
+				</div>{/each}
+		</div>
 	</section>
 </div>
 
 <style>
-	.support-grid { display: grid; grid-template-columns: minmax(300px, .88fr) minmax(380px, 1.12fr); gap: 20px; align-items: start; }
-	.support-panel { background: #fff; border: 1px solid #dbe7df; border-radius: 16px; padding: 28px; }
-	.panel-heading, .ticket-top, .ticket { display: flex; justify-content: space-between; gap: 16px; }
-	.panel-heading { align-items: start; margin-bottom: 24px; }
-	.eyebrow { color: #6b9485; font-size: 11px; font-weight: 800; letter-spacing: .14em; margin: 0 0 8px; text-transform: uppercase; }
-	h2 { color: var(--musha-ink); font-size: 25px; letter-spacing: -.055em; margin: 0; }
-	.panel-heading p:not(.eyebrow), .ticket p, .empty p { color: #789287; line-height: 1.5; margin: 7px 0 0; }
-	.plus, .count { align-items: center; background: #edf5d9; border-radius: 13px; color: #528156; display: inline-flex; font-size: 24px; height: 52px; justify-content: center; width: 52px; }
-	.count { font-size: 14px; }
-	form { display: grid; gap: 16px; }
-	label { color: #466c5e; display: grid; font-size: 13px; font-weight: 700; gap: 7px; }
-	input, textarea, select { background: #fbfcfa; border: 1px solid #d7e5dc; border-radius: 8px; box-sizing: border-box; color: var(--musha-ink); font: inherit; font-size: 14px; font-weight: 500; padding: 13px 14px; width: 100%; }
-	textarea { resize: vertical; }
-	.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
-	.attachment-input { background: #f8fbf7; border: 1px dashed #b7d0bf; border-radius: 8px; padding: 11px 13px; }
-	.attachment-input span { display: grid; gap: 3px; }
-	.attachment-input small { color: #789287; font-size: 11px; font-weight: 500; }
-	.attachment-input input { background: transparent; border: 0; font-size: 12px; padding: 8px 0 0; }
-	.primary { background: var(--musha-ink); border: 0; border-radius: 8px; color: #fff; cursor: pointer; font: inherit; font-weight: 700; margin-top: 2px; padding: 14px 16px; }
-	.primary span { color: #9ad64d; margin-left: 12px; }
-	.ticket-list { display: grid; gap: 10px; }
-	.ticket { border: 1px solid #e0ebe4; border-radius: 10px; padding: 16px; }
-	.ticket > div { min-width: 0; }
-	.ticket strong { color: var(--musha-ink); font-size: 15px; }
-	.ticket p { color: #637d70; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.ticket small { color: #8aa095; font-size: 11px; }
-	.attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-	.attachments a { background: #edf5d9; border-radius: 5px; color: #4f7657; font-size: 11px; max-width: 220px; overflow: hidden; padding: 5px 7px; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
-	.priority, .status { border-radius: 999px; font-size: 10px; font-weight: 800; padding: 5px 8px; text-transform: capitalize; white-space: nowrap; }
-	.priority { background: #eef3ef; color: #547062; }
-	.priority.high, .priority.urgent { background: #fff0dd; color: #a66220; }
-	.status { align-self: start; background: #edf5d9; color: #52775a; }
-	.status.in_progress { background: #e4f0fa; color: #3d718e; }
-	.status.waiting_on_client { background: #fff4dc; color: #926b25; }
-	.status.resolved, .status.closed { background: #e4f2e8; color: #427a54; }
-	.empty { align-items: center; color: #4e7061; display: grid; justify-items: center; min-height: 270px; text-align: center; }
-	.empty span { align-items: center; background: #edf5d9; border-radius: 50%; color: #55875d; display: flex; font-size: 24px; height: 62px; justify-content: center; width: 62px; }
-	.empty strong { margin-top: 16px; }
-	.empty p { font-size: 13px; margin-top: 7px; max-width: 260px; }
-	@media (max-width: 860px) { .support-grid { grid-template-columns: 1fr; } }
-	@media (max-width: 520px) { .support-panel { padding: 20px; } .fields { grid-template-columns: 1fr; } .ticket { display: grid; } }
+	.support-tickets {
+		display: grid;
+		gap: 12px;
+	}
+	.support-ticket {
+		border: 1px solid #dfe7d3;
+		border-radius: 9px;
+		background: #fafcf5;
+		overflow: hidden;
+	}
+	.support-ticket summary {
+		display: flex;
+		align-items: center;
+		gap: 20px;
+		padding: 20px;
+		cursor: pointer;
+	}
+	.support-ticket summary > span:first-child {
+		flex: 1;
+		min-width: 0;
+	}
+	.support-ticket strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #58773e;
+		overflow-wrap: anywhere;
+	}
+	.support-ticket small {
+		display: block;
+		font-size: 9px;
+		color: #99ac83;
+		line-height: 1.8;
+		margin-top: 7px;
+	}
+	.support-ticket .tag {
+		text-transform: capitalize;
+	}
+	.ticket-detail {
+		padding: 0 20px 20px;
+	}
+	.ticket-detail > p {
+		font-size: 12px;
+		line-height: 1.9;
+		white-space: pre-wrap;
+		color: #789362;
+		overflow-wrap: anywhere;
+	}
+	.support-attachments {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 9px;
+		margin-top: 17px;
+	}
+	.support-attachments a,
+	.support-attachments span {
+		font-size: 10px;
+		color: #749656;
+		background: #eaf1df;
+		border: 1px solid #dbe7cd;
+		border-radius: 5px;
+		padding: 8px 12px;
+		text-decoration: none;
+		overflow-wrap: anywhere;
+	}
+	.support-ticket summary:focus-visible {
+		outline: 2px solid #9db57d;
+		outline-offset: -3px;
+	}
+	@media (max-width: 600px) {
+		.support-ticket summary {
+			gap: 10px;
+			flex-wrap: wrap;
+			padding: 17px;
+		}
+		.support-ticket summary > span:first-child {
+			flex-basis: 100%;
+		}
+	}
 </style>

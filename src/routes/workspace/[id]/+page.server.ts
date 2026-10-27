@@ -1,175 +1,167 @@
-import { getWorkspaceAccess } from '$lib/server/workspace';
-import { redirect } from '@sveltejs/kit';
+﻿import { getWorkspaceAccess } from '$lib/server/workspace';
+import { error, redirect } from '@sveltejs/kit';
+import { buildDashboard, organizationDate, shiftMonth } from '$lib/dashboard/snapshot';
+import type {
+	Property,
+	Space,
+	Tenancy,
+	Charge,
+	Payment,
+	Allocation,
+	Maintenance,
+	Expense,
+	Activity
+} from '$lib/dashboard/snapshot';
 
-const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
-const addDays = (date: Date, days: number) => {
-	const result = new Date(date);
-	result.setDate(result.getDate() + days);
-	return result;
-};
-
-export const load = async ({ locals, params }) => {
+// Supabase caps responses by default. Page every source rather than presenting a truncated total.
+async function allRows<T>(
+	page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>
+) {
+	const rows: T[] = [];
+	const pageSize = 500;
+	for (let from = 0; ; from += pageSize) {
+		const result = await page(from, from + pageSize - 1);
+		if (result.error)
+			throw error(503, 'The dashboard data could not be loaded. Please refresh to try again.');
+		const batch = result.data ?? [];
+		rows.push(...batch);
+		if (batch.length < pageSize) return rows;
+	}
+}
+export const load = async ({ locals, params, url }) => {
 	const access = await getWorkspaceAccess(locals, params.id);
 	if (!access) {
 		const { user } = await locals.safeGetSession();
 		if (!user) throw redirect(303, '/login');
 		throw redirect(303, '/workspace');
 	}
-
-	const now = new Date();
-	const today = dateOnly(now);
-	const startOfMonth = `${today.slice(0, 7)}-01`;
-	const endOfMonth = dateOnly(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-	const leaseWindowEnd = dateOnly(addDays(now, 60));
-
-	const [properties, spaces, people, tenancies, charges, payments, maintenance, activity, members] =
-		await Promise.all([
-			locals.supabase
+	const today = organizationDate(new Date(), access.organization.timezone || 'Africa/Harare');
+	const currentMonth = today.slice(0, 7);
+	const months = Array.from({ length: 12 }, (_, i) => shiftMonth(currentMonth, -i));
+	const requested = url.searchParams.get('month');
+	const month = requested && months.includes(requested) ? requested : currentMonth;
+	const db = locals.supabase;
+	const [
+		properties,
+		spaces,
+		tenancies,
+		charges,
+		payments,
+		allocations,
+		maintenance,
+		expenses,
+		activity
+	] = await Promise.all([
+		allRows<Property>((from, to) =>
+			db
 				.from('properties')
-				.select('id, name, city, country, status, latitude, longitude, created_at')
+				.select('id,name,city,country,status')
 				.eq('organization_id', params.id)
-				.order('name'),
-			locals.supabase
+				.order('id')
+				.range(from, to)
+		),
+		allRows<Space>((from, to) =>
+			db
 				.from('spaces')
-				.select('id, property_id, name, kind, status, monthly_rent, created_at')
-				.eq('organization_id', params.id),
-			locals.supabase
-				.from('people')
-				.select('id', { count: 'exact', head: true })
-				.eq('organization_id', params.id),
-			locals.supabase
+				.select('id,property_id,parent_space_id,name,status')
+				.eq('organization_id', params.id)
+				.order('id')
+				.range(from, to)
+		),
+		allRows<Tenancy>((from, to) =>
+			db
 				.from('tenancies')
-				.select('id, space_id, status, start_date, end_date, rent_amount, billing_frequency')
+				.select('id,space_id,status,start_date,end_date')
 				.eq('organization_id', params.id)
-				.order('start_date', { ascending: false }),
-			locals.supabase
+				.order('id')
+				.range(from, to)
+		),
+		allRows<Charge>((from, to) =>
+			db
 				.from('charges')
-				.select('id, tenancy_id, description, amount, due_on, charge_type')
+				.select('id,tenancy_id,description,amount,due_on,status')
 				.eq('organization_id', params.id)
-				.order('due_on', { ascending: true }),
-			locals.supabase
+				.order('id')
+				.range(from, to)
+		),
+		allRows<Payment>((from, to) =>
+			db
 				.from('payments')
-				.select('id, tenancy_id, amount, payment_date, method')
+				.select('id,tenancy_id,amount,payment_date,method')
 				.eq('organization_id', params.id)
-				.order('payment_date', { ascending: false }),
-			locals.supabase
+				.order('id')
+				.range(from, to)
+		),
+		allRows<Allocation>((from, to) =>
+			db
+				.from('payment_allocations')
+				.select('payment_id,charge_id,amount,charges!inner(organization_id)')
+				.eq('charges.organization_id', params.id)
+				.order('payment_id')
+				.order('charge_id')
+				.range(from, to)
+		),
+		allRows<Maintenance>((from, to) =>
+			db
 				.from('maintenance_requests')
-				.select('id, property_id, space_id, title, priority, status, created_at')
+				.select('id,property_id,space_id,title,priority,status,created_at,sla_due_at')
 				.eq('organization_id', params.id)
-				.order('created_at', { ascending: false }),
-			locals.supabase
-				.from('audit_logs')
-				.select('id, action, entity_type, metadata, created_at')
+				.order('id')
+				.range(from, to)
+		),
+		allRows<Expense>((from, to) =>
+			db
+				.from('property_expenses')
+				.select('id,category,amount,expense_date,approval_status')
 				.eq('organization_id', params.id)
-				.order('created_at', { ascending: false })
-				.limit(5),
-			locals.supabase
-				.from('organization_members')
-				.select('user_id', { count: 'exact', head: true })
-				.eq('organization_id', params.id)
-		]);
-
-	const propertyRows = properties.data ?? [];
-	const spaceRows = spaces.data ?? [];
-	const tenancyRows = tenancies.data ?? [];
-	const chargeRows = charges.data ?? [];
-	const paymentRows = payments.data ?? [];
-	const maintenanceRows = maintenance.data ?? [];
-	const activeTenancies = tenancyRows.filter((tenancy) =>
-		['active', 'ending_soon'].includes(tenancy.status)
+				.order('id')
+				.range(from, to)
+		),
+		db
+			.from('audit_logs')
+			.select('id,action,entity_type,created_at')
+			.eq('organization_id', params.id)
+			.order('created_at', { ascending: false })
+			.limit(5)
+			.then((result) => {
+				if (result.error)
+					throw error(503, 'Recent activity could not be loaded. Please refresh to try again.');
+				return (result.data ?? []) as Activity[];
+			})
+	]);
+	const records = {
+		properties,
+		spaces,
+		tenancies,
+		charges,
+		payments,
+		allocations,
+		maintenance,
+		expenses,
+		activity
+	};
+	const asOf = new Date().toISOString();
+	const snapshots = months.map((key) => buildDashboard(records, today, key, asOf));
+	const periods = Object.fromEntries(
+		snapshots.map((snapshot) => [
+			snapshot.month,
+			{
+				month: snapshot.month,
+				finance: snapshot.finance,
+				monthly: snapshot.monthly,
+				categories: snapshot.categories,
+				expenseTotal: snapshot.expenseTotal,
+				recentPayments: snapshot.recentPayments
+			}
+		])
 	);
-	const occupiedSpaces = spaceRows.filter((space) => space.status === 'occupied').length;
-	const rentableSpaces = spaceRows.filter((space) => space.status !== 'inactive').length;
-	const total = (rows: { amount: number | string }[]) =>
-		rows.reduce((sum, row) => sum + Number(row.amount), 0);
-	const dueThisMonth = total(
-		chargeRows.filter((charge) => charge.due_on >= startOfMonth && charge.due_on <= endOfMonth)
-	);
-	const receivedThisMonth = total(
-		paymentRows.filter(
-			(payment) => payment.payment_date >= startOfMonth && payment.payment_date <= endOfMonth
-		)
-	);
-	const totalCharges = total(chargeRows);
-	const totalPayments = total(paymentRows);
-	const openMaintenance = maintenanceRows.filter(
-		(request) => !['completed', 'closed'].includes(request.status)
-	);
-	const urgentMaintenance = openMaintenance.filter((request) => request.priority === 'urgent');
-	const expiringTenancies = activeTenancies
-		.filter(
-			(tenancy) =>
-				tenancy.end_date && tenancy.end_date >= today && tenancy.end_date <= leaseWindowEnd
-		)
-		.slice(0, 4);
-	const overdueCharges = chargeRows.filter((charge) => charge.due_on < today).slice(0, 4);
-
-	const propertyHealth = propertyRows.map((property) => {
-		const propertySpaces = spaceRows.filter((space) => space.property_id === property.id);
-		const occupied = propertySpaces.filter((space) => space.status === 'occupied').length;
-		const propertyMaintenance = openMaintenance.filter(
-			(request) => request.property_id === property.id
-		).length;
-		return {
-			...property,
-			spaces: propertySpaces.length,
-			occupied,
-			maintenance: propertyMaintenance
-		};
-	});
-
-	const setupProgress = [
-		propertyRows.length > 0,
-		spaceRows.length > 0,
-		(people.count ?? 0) > 0,
-		activeTenancies.length > 0,
-		chargeRows.length > 0
-	];
-	const watchlist = [
-		...urgentMaintenance.map((request) => ({
-			kind: 'urgent',
-			title: request.title,
-			detail: 'Urgent maintenance request',
-			href: '/maintenance'
-		})),
-		...expiringTenancies.map((tenancy) => ({
-			kind: 'lease',
-			title: `Lease ends ${tenancy.end_date}`,
-			detail: 'Review renewal or move-out plan',
-			href: '/people'
-		})),
-		...overdueCharges.map((charge) => ({
-			kind: 'collections',
-			title: charge.description,
-			detail: `Charge due ${charge.due_on}`,
-			href: '/finance'
-		}))
-	].slice(0, 5);
-
+	const attention = await db.rpc('workflow_attention', { target_org: params.id });
 	return {
+		attention: attention.data ?? [],
+		attentionUnavailable: Boolean(attention.error),
 		...access,
-		counts: {
-			properties: propertyRows.length,
-			spaces: spaceRows.length,
-			people: people.count ?? 0,
-			activeTenancies: activeTenancies.length,
-			openMaintenance: openMaintenance.length,
-			occupiedSpaces,
-			rentableSpaces,
-			teamMembers: members.count ?? 0
-		},
-		finance: {
-			dueThisMonth,
-			receivedThisMonth,
-			outstanding: Math.max(0, totalCharges - totalPayments),
-			totalCharges,
-			totalPayments
-		},
-		propertyHealth,
-		watchlist,
-		expiringTenancies,
-		activity: activity.data ?? [],
-		setup: { complete: setupProgress.filter(Boolean).length, total: setupProgress.length },
-		recentPayments: paymentRows.slice(0, 4)
+		months,
+		periods,
+		snapshot: snapshots.find((snapshot) => snapshot.month === month)!
 	};
 };

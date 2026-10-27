@@ -1,585 +1,209 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import WorkspaceChrome from '$lib/components/WorkspaceChrome.svelte';
 	import { resolve } from '$app/paths';
-	let { data, form } = $props();
-	// The tab is intentionally writable because the setup sidebar changes it locally.
-	// eslint-disable-next-line svelte/prefer-writable-derived
-	let tab = $state('properties');
-	$effect(() => {
-		tab = data.defaultTab ?? 'properties';
-	});
-	const setupAreas = $derived([
-		{ key: 'properties', label: 'Properties', done: data.properties.length > 0 },
-		{ key: 'spaces', label: 'Units & spaces', done: data.spaces.length > 0 },
+	import { rentableSpaces } from '$lib/dashboard/portfolio';
+	import { isCurrentLease } from '$lib/dashboard/leases';
+	import { organizationDate } from '$lib/dashboard/snapshot';
+	import '$lib/styles/aligned-workspace.css';
+	let { data } = $props();
+	const today = $derived(
+		organizationDate(new Date(), data.organization.timezone || 'Africa/Harare')
+	);
+	const activeProperties = $derived(
+		data.properties.filter((row: { status: string }) => row.status === 'active')
+	);
+	const spaces = $derived(rentableSpaces(data.properties, data.spaces));
+	const current = $derived(
+		data.tenancies.filter((lease: Parameters<typeof isCurrentLease>[0]) =>
+			isCurrentLease(lease, today)
+		)
+	);
+	const areas = $derived([
 		{
-			key: 'people',
-			label: 'People & leases',
-			done: data.people.length > 0 && data.tenancies.some((tenancy) => tenancy.status === 'active')
+			key: 'properties',
+			title: 'Establish your portfolio',
+			copy: 'Register each property, its rental model and map location.',
+			count: `${activeProperties.length} active properties`,
+			done: activeProperties.length > 0,
+			href: resolve(`/workspace/${data.organization.id}/properties`),
+			action: 'Manage properties'
 		},
 		{
-			key: 'review',
-			label: 'Review workspace',
-			done:
-				data.properties.length > 0 &&
-				data.spaces.length > 0 &&
-				data.tenancies.some((tenancy) => tenancy.status === 'active')
+			key: 'spaces',
+			title: 'Shape your rentable spaces',
+			copy: 'Use the property register to configure units, rooms or beds.',
+			count: `${spaces.length} rentable spaces`,
+			done: spaces.length > 0,
+			href: resolve(`/workspace/${data.organization.id}/properties`),
+			action: 'Review property spaces'
+		},
+		{
+			key: 'people',
+			title: 'Connect your people and leases',
+			copy: 'Onboard tenants, check lease dates and complete check-in when appropriate.',
+			count: `${current.length} current leases`,
+			done: current.length > 0,
+			href: resolve(`/workspace/${data.organization.id}/people`),
+			action: 'Open people & leases'
+		},
+		{
+			key: 'settings',
+			title: 'Set your operating defaults',
+			copy: 'Review branding, rent defaults, notifications and team roles before daily operation.',
+			count: 'Review required',
+			done: false,
+			href: resolve(`/workspace/${data.organization.id}/settings`),
+			action: 'Review settings'
 		}
 	]);
-	const completedSetupAreas = $derived(setupAreas.filter((area) => area.done).length);
-	const setupProgress = $derived(Math.round((completedSetupAreas / setupAreas.length) * 100));
+	const complete = $derived(areas.filter((area) => area.done).length);
 </script>
 
-<svelte:head><title>Organization setup · {data.organization.name} · Musha</title></svelte:head>
-
+<svelte:head><title>Organization setup — {data.organization.name} · Musha</title></svelte:head>
 <WorkspaceChrome
 	organization={data.organization}
 	modules={data.modules}
 	active="setup"
 	role={data.membership.role}
+	supportMode={data.supportMode}
 >
-	<section class="heading">
-		<div>
-			<p class="eyebrow">Organization setup</p>
-			<h1>Make your workspace yours<span>.</span></h1>
-			<p>
-				Set up your portfolio and operating records. Your progress updates automatically as records
-				are added.
-			</p>
-		</div>
-		<span class="role">{data.membership.role}</span>
-	</section>
-	{#if form?.message}<div class:failure={!form.success} class="notice">{form.message}</div>{/if}
-	<section class="readiness-card" aria-label="Workspace setup readiness">
-		<div>
-			<p class="eyebrow">Setup readiness</p>
-			<h2>{completedSetupAreas} of {setupAreas.length} areas ready</h2>
-			<p>Musha updates this picture from your actual properties, spaces, and active leases.</p>
-		</div>
-		<div class="readiness-meter" aria-label={`${setupProgress}% complete`}>
-			<strong>{setupProgress}%</strong>
-			<div><span style={`width: ${setupProgress}%`}></span></div>
-		</div>
-		<div class="setup-actions">
-			<a href={resolve(`/workspace/${data.organization.id}/properties`)}>Manage portfolio</a>
-			<a href={resolve(`/workspace/${data.organization.id}/new-tenant`)}>Add tenant</a>
-			<a href={resolve(`/workspace/${data.organization.id}/settings`)}>Open settings</a>
-		</div>
-	</section>
-	<div class="setup-layout">
-		<aside class="steps">
-			<p class="eyebrow">Setup areas</p>
-			<button class:active={tab === 'properties'} onclick={() => (tab = 'properties')}
-				>01 <span>Properties</span><b>{data.properties.length ? '✓' : '—'}</b></button
-			><button class:active={tab === 'spaces'} onclick={() => (tab = 'spaces')}
-				>02 <span>Units & spaces</span><b>{data.spaces.length ? '✓' : '—'}</b></button
-			><button class:active={tab === 'people'} onclick={() => (tab = 'people')}
-				>03 <span>People & leases</span><b
-					>{data.people.length || data.tenancies.length ? '✓' : '—'}</b
-				></button
-			><button class:active={tab === 'review'} onclick={() => (tab = 'review')}
-				>04 <span>Review workspace</span><b>→</b></button
-			>
-		</aside>
-		<section class="work-panel">
-			{#if tab === 'properties'}
-				<div class="panel-heading">
-					<div>
-						<p class="eyebrow">Portfolio</p>
-						<h2>Add properties</h2>
-						<p>Buildings, locations, residences, shops, or listings.</p>
-					</div>
-					<span class="count">{data.properties.length}</span>
-				</div>
-				<form method="POST" action="?/addProperty" class="inline-form">
-					<input name="name" required placeholder="Property name" /><input
-						name="code"
-						placeholder="Code"
-					/><input name="city" placeholder="City" /><button class="primary" type="submit"
-						>Add property <span>→</span></button
-					>
-				</form>
-				{#if data.properties.length === 0}<div class="empty">
-						No properties have been added yet.
-					</div>{:else}<div class="records">
-						{#each data.properties as property (property.id)}<div class="record">
-								<span class="record-icon">⌂</span>
-								<div>
-									<strong>{property.name}</strong><small
-										>{property.code ?? 'No code'} · {property.city ?? 'No city'}</small
-									>
-								</div>
-								<span class="status">{property.status}</span>
-							</div>{/each}
-					</div>{/if}
-			{:else if tab === 'spaces'}
-				<div class="panel-heading">
-					<div>
-						<p class="eyebrow">Inventory</p>
-						<h2>Add units and spaces</h2>
-						<p>Define the rentable inventory under each property.</p>
-					</div>
-					<span class="count">{data.spaces.length}</span>
-				</div>
-				{#if data.properties.length === 0}<div class="notice">
-						Add at least one property before creating units.
-					</div>{:else}<form method="POST" action="?/addSpace" class="space-form">
-						<select name="property_id" required
-							><option value="">Choose property</option
-							>{#each data.properties as property (property.id)}<option value={property.id}
-									>{property.name}</option
-								>{/each}</select
-						><input name="name" required placeholder="Unit name or number" /><input
-							name="monthly_rent"
-							type="number"
-							min="0"
-							step="0.01"
-							placeholder={`Monthly rent (${data.organization.currency_code})`}
-						/><button class="primary" type="submit">Add unit <span>→</span></button>
-					</form>{/if}
-				{#if data.spaces.length === 0}<div class="empty">
-						No units have been added yet.
-					</div>{:else}<div class="records">
-						{#each data.spaces as space (space.id)}<div class="record">
-								<span class="record-icon">◌</span>
-								<div>
-									<strong>{space.name}</strong><small
-										>{space.kind} · {space.monthly_rent ?? 'Rent not set'}</small
-									>
-								</div>
-								<span class="status">{space.status}</span>
-							</div>{/each}
-					</div>{/if}
-			{:else if tab === 'people'}
-				<div class="panel-heading">
-					<div>
-						<p class="eyebrow">People & leases</p>
-						<h2>Bring in your people</h2>
-						<p>
-							Tenants, students, occupiers, guests, suppliers, and lease records will live here.
-						</p>
-					</div>
-					<span class="count">{data.people.length + data.tenancies.length}</span>
-				</div>
-				<div class="future-card">
-					<div>↗</div>
-					<strong>Open the people and lease workspace.</strong>
-					<p>
-						Add tenants and contacts, create leases against the exact room or unit, and set rent,
-						deposit, billing and start dates.
-					</p>
-					<a class="primary" href={resolve(`/workspace/${data.organization.id}/people`)}
-						>Manage people & leases <span>→</span></a
-					>
-				</div>
-			{:else}
-				<div class="panel-heading">
-					<div>
-						<p class="eyebrow">Review</p>
-						<h2>Your workspace is taking shape</h2>
-						<p>These records will appear across your dashboard as you add them.</p>
-					</div>
-				</div>
-				<div class="review-list">
-					<div>
-						<span>Properties</span><strong>{data.properties.length ? 'Ready' : 'Next'}</strong>
-					</div>
-					<div>
-						<span>Units & spaces</span><strong>{data.spaces.length ? 'Ready' : 'Next'}</strong>
-					</div>
-					<div>
-						<span>People & leases</span><strong
-							>{data.people.length || data.tenancies.length ? 'Ready' : 'Next'}</strong
+	<div class="aligned-workspace setup-workspace">
+		<header class="heading">
+			<div>
+				<p class="eyebrow">WORKSPACE / ORGANIZATION SETUP</p>
+				<h1>Good foundations. <em>A better everyday.</em></h1>
+				<p>One setup checklist, connected to the same workflows your team uses day to day.</p>
+			</div>
+			<a class="primary" href={resolve(`/workspace/${data.organization.id}`)}>View workspace</a>
+		</header>
+		<section class="panel setup-progress">
+			<div>
+				<p class="eyebrow">RECORD READINESS</p>
+				<h2>{complete} of 3 record foundations ready</h2>
+				<p>
+					Properties, terminal rentable spaces and current leases are checked against your records.
+					Operating settings require your team’s review.
+				</p>
+			</div>
+			<div>
+				<strong>{Math.round((complete / 3) * 100)}%</strong>
+				<div class="setup-track"><i style:width={`${(complete / 3) * 100}%`}></i></div>
+			</div>
+		</section>
+		<div class="setup-cards">
+			{#each areas as area, i (area.key)}<section class="panel setup-card">
+					<div class="setup-card-top">
+						<span>0{i + 1}</span><span class="tag"
+							>{area.done
+								? 'Records present'
+								: area.key === 'settings'
+									? 'Manual review'
+									: 'Next step'}</span
 						>
 					</div>
-					<div><span>Workspace modules</span><strong>{data.modules.length} enabled</strong></div>
+					<h2>{area.title}</h2>
+					<p>{area.copy}</p>
+					<small>{area.count}</small><a class="secondary" href={area.href}>{area.action} ↗</a>
+				</section>{/each}
+		</div>
+		<section class="panel">
+			<div class="panel-heading">
+				<div>
+					<p class="eyebrow">WORKSPACE SCOPE</p>
+					<h2>{data.organization.name}</h2>
+					<p>Available modules are allocated by the platform team.</p>
 				</div>
-			{/if}
+			</div>
+			<div class="setup-modules">
+				{#each data.modules as module (module.module_key)}<span class="tag"
+						>{module.module_key.replaceAll('_', ' ')}</span
+					>{:else}<p>
+						No modules are allocated yet. Contact support to review workspace access.
+					</p>{/each}
+			</div>
 		</section>
 	</div>
 </WorkspaceChrome>
 
 <style>
-	.heading {
-		display: flex;
-		align-items: flex-end;
-		justify-content: space-between;
-		gap: 20px;
-		margin-bottom: 30px;
-	}
-	.eyebrow {
-		color: #7b9588;
-		font-size: 11px;
-		font-weight: 700;
-		letter-spacing: 0.16em;
-		margin: 0 0 9px;
-		text-transform: uppercase;
-	}
-	h1,
-	h2,
-	p {
-		margin-top: 0;
-	}
-	h1 {
-		font-size: clamp(36px, 5vw, 62px);
-		line-height: 0.95;
-		letter-spacing: -0.08em;
-		margin-bottom: 14px;
-	}
-	h1 span {
-		color: var(--musha-lime);
-	}
-	.heading > div > p:last-child {
-		color: #718a7e;
-		font-size: 15px;
-		line-height: 1.6;
-		margin: 0;
-	}
-	.role,
-	.count {
-		padding: 8px 10px;
-		border-radius: 99px;
-		background: #edf4dc;
-		color: #668a6d;
-		font-size: 12px;
-		text-transform: capitalize;
-	}
-	.notice {
-		padding: 12px 15px;
-		margin: -10px 0 18px;
-		border-radius: 8px;
-		background: #e5f2e5;
-		color: #376b4a;
-		font-size: 13px;
-	}
-	.notice.failure {
-		background: #fae9e5;
-		color: #9a5548;
-	}
-	.readiness-card {
+	.setup-progress {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) 160px auto;
+		grid-template-columns: 1fr 170px;
 		align-items: center;
-		gap: 26px;
-		margin-bottom: 18px;
-		padding: 22px 24px;
-		border: 1px solid #dce8dc;
-		border-radius: 12px;
-		background: linear-gradient(120deg, #f1f8e6, #ffffff 68%);
+		gap: 40px;
+		background: #edf3e3 !important;
 	}
-	.readiness-card h2 {
-		margin: 0 0 5px;
-		color: var(--musha-ink);
-		font-size: 25px;
-		letter-spacing: -0.06em;
+	.setup-progress p {
+		font-size: 11px;
+		color: #91a57a;
+		line-height: 1.9;
+		max-width: 700px;
+		margin-bottom: 0;
 	}
-	.readiness-card p:not(.eyebrow) {
-		margin: 0;
-		color: #6f8e80;
-		font-size: 14px;
-		line-height: 1.5;
+	.setup-progress strong {
+		font-size: 37px;
+		font-weight: 500;
+		color: #68844f;
+		letter-spacing: -1.5px;
 	}
-	.readiness-meter {
-		display: grid;
-		gap: 9px;
-	}
-	.readiness-meter strong {
-		color: var(--musha-ink);
-		font-size: 30px;
-		letter-spacing: -0.06em;
-	}
-	.readiness-meter > div {
-		height: 8px;
+	.setup-track {
+		height: 6px;
+		background: #dbe7c9;
+		border-radius: 5px;
+		margin-top: 15px;
 		overflow: hidden;
-		border-radius: 999px;
-		background: #dcead7;
 	}
-	.readiness-meter span {
+	.setup-track i {
 		display: block;
 		height: 100%;
-		border-radius: inherit;
-		background: var(--musha-lime);
-		transition: width 240ms ease;
+		background: #8da96c;
 	}
-	.setup-actions {
-		display: flex;
-		flex-wrap: wrap;
-		justify-content: end;
-		gap: 8px;
-	}
-	.setup-actions a {
-		border-bottom: 1px solid #a6c686;
-		color: #3e755b;
-		font-size: 13px;
-		font-weight: 700;
-		padding: 4px 0;
-		text-decoration: none;
-	}
-	.setup-layout {
+	.setup-cards {
 		display: grid;
-		grid-template-columns: 208px minmax(0, 1fr);
-		gap: 14px;
-		align-items: start;
+		grid-template-columns: 1fr 1fr;
+		gap: 18px;
 	}
-	.steps {
-		padding: 20px 11px;
-		border-radius: 10px;
-		background: var(--musha-ink);
-	}
-	.steps .eyebrow {
-		padding: 0 10px;
-		color: #87b39d;
-	}
-	.steps button {
-		width: 100%;
-		display: grid;
-		grid-template-columns: 24px 1fr 16px;
-		align-items: center;
-		gap: 5px;
-		border: 0;
-		border-radius: 7px;
-		padding: 11px 10px;
-		background: transparent;
-		color: #8bb19e;
-		text-align: left;
-		cursor: pointer;
-		font: inherit;
-		font-size: 12px;
-	}
-	.steps button span {
-		font-size: 13px;
-	}
-	.steps button b {
-		color: #769d8a;
-		font-size: 12px;
-		text-align: right;
-	}
-	.steps button.active {
-		background: #235447;
-		color: #fff;
-	}
-	.steps button.active b {
-		color: var(--musha-lime);
-	}
-	.work-panel {
-		min-height: 450px;
-		padding: 26px;
-		border: 1px solid #e4ebe4;
-		border-radius: 10px;
-		background: #fff;
-	}
-	.panel-heading {
+	.setup-card-top {
 		display: flex;
-		align-items: flex-start;
 		justify-content: space-between;
-		gap: 15px;
-	}
-	.panel-heading h2 {
-		font-size: 26px;
-		letter-spacing: -0.06em;
-		margin: 0 0 9px;
-	}
-	.panel-heading p:not(.eyebrow) {
-		color: #7d9188;
-		font-size: 14px;
-		line-height: 1.5;
-		margin: 0;
-	}
-	.inline-form,
-	.space-form {
-		display: grid;
-		grid-template-columns: 1.4fr 0.75fr 1fr auto;
-		gap: 8px;
-		margin: 26px 0 16px;
-	}
-	.inline-form input,
-	.space-form input,
-	.space-form select {
-		min-width: 0;
-		border: 1px solid #dfe9e1;
-		border-radius: 6px;
-		background: #fbfcfa;
-		color: #426456;
-		padding: 10px;
-		font: inherit;
-		font-size: 13px;
-	}
-	.primary {
-		display: inline-flex;
 		align-items: center;
-		justify-content: center;
-		gap: 14px;
-		border: 0;
-		border-radius: 7px;
-		background: var(--musha-deep);
-		color: #fff;
-		padding: 11px 14px;
-		font-size: 13px;
-		font-weight: 700;
-		text-decoration: none;
-		cursor: pointer;
-		white-space: nowrap;
+		margin-bottom: 25px;
 	}
-	.primary span {
-		color: var(--musha-lime);
-		font-size: 17px;
+	.setup-card-top > span:first-child {
+		font-size: 12px;
+		color: #a0b38b;
 	}
-	.records {
-		display: grid;
-		gap: 7px;
+	.setup-card p {
+		font-size: 12px;
+		color: #96a983;
+		line-height: 1.9;
+		max-width: 430px;
 	}
-	.record {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 11px;
-		border: 1px solid #edf2ed;
-		border-radius: 7px;
-	}
-	.record-icon {
-		display: grid;
-		place-items: center;
-		width: 32px;
-		height: 32px;
-		border-radius: 8px;
-		background: #edf4dc;
-		color: #63896a;
-	}
-	.record > div:nth-child(2) {
-		min-width: 0;
-		flex: 1;
-	}
-	.record strong,
-	.record small {
+	.setup-card small {
 		display: block;
-	}
-	.record strong {
-		color: #345b4b;
-		font-size: 13px;
-	}
-	.record small {
-		color: #93a299;
-		font-size: 11px;
-		margin-top: 4px;
-	}
-	.status {
-		padding: 5px 8px;
-		border-radius: 99px;
-		background: #edf4dc;
-		color: #668a6d;
 		font-size: 10px;
-		text-transform: capitalize;
+		color: #8aa16f;
+		margin: 20px 0;
 	}
-	.empty {
-		display: grid;
-		place-content: center;
-		min-height: 210px;
-		color: #8b9e94;
-		font-size: 13px;
-		text-align: center;
-		border: 1px dashed #dce8dd;
-		border-radius: 7px;
-		margin-top: 20px;
+	.setup-card a {
+		display: inline-block;
 	}
-	.future-card {
-		display: grid;
-		place-content: center;
-		justify-items: center;
-		min-height: 270px;
-		text-align: center;
-	}
-	.future-card div {
-		display: grid;
-		place-items: center;
-		width: 50px;
-		height: 50px;
-		border-radius: 50%;
-		background: #edf4dc;
-		color: #668d6d;
-		font-size: 21px;
-		margin-bottom: 13px;
-	}
-	.future-card strong {
-		color: #46695a;
-		font-size: 15px;
-	}
-	.future-card p {
-		color: #92a198;
-		font-size: 13px;
-		margin: 7px 0 0;
-	}
-	.future-card .primary {
-		margin-top: 18px;
-	}
-	.review-list {
-		display: grid;
-		gap: 8px;
-		max-width: 530px;
-		margin: 28px 0;
-	}
-	.review-list div {
+	.setup-modules {
 		display: flex;
-		justify-content: space-between;
-		padding: 13px;
-		border: 1px solid #edf2ed;
-		border-radius: 7px;
+		gap: 10px;
+		flex-wrap: wrap;
 	}
-	.review-list span {
-		color: #7d9188;
-		font-size: 13px;
+	.setup-modules > p {
+		font-size: 11px;
+		color: #9aae87;
 	}
-	.review-list strong {
-		color: #668a6d;
-		font-size: 13px;
-	}
-	@media (max-width: 800px) {
-		.readiness-card {
+	@media (max-width: 700px) {
+		.setup-cards {
 			grid-template-columns: 1fr;
 		}
-		.setup-actions {
-			justify-content: start;
-		}
-		.heading {
-			display: block;
-		}
-		.role {
-			display: inline-block;
-			margin-top: 20px;
-		}
-		.setup-layout {
+		.setup-progress {
 			grid-template-columns: 1fr;
-		}
-		.steps {
-			display: flex;
-			overflow-x: auto;
-			gap: 5px;
-			padding: 12px;
-		}
-		.steps .eyebrow {
-			display: none;
-		}
-		.steps button {
-			min-width: 155px;
-		}
-		.inline-form,
-		.space-form {
-			grid-template-columns: 1fr 1fr;
-		}
-		.inline-form button,
-		.space-form button {
-			grid-column: span 2;
-		}
-	}
-	@media (max-width: 520px) {
-		.work-panel {
-			padding: 18px;
-		}
-		.inline-form,
-		.space-form {
-			grid-template-columns: 1fr;
-		}
-		.inline-form button,
-		.space-form button {
-			grid-column: auto;
+			gap: 25px;
 		}
 	}
 </style>

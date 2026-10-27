@@ -1,3 +1,4 @@
+import { validateLeaseTerms } from '$lib/dashboard/leases';
 import {
 	canManageFinance,
 	canManageMaintenance,
@@ -161,6 +162,23 @@ const getMaintenanceAccess = async (locals: App.Locals, organizationId: string) 
 		: null;
 };
 
+// Fetch every page for operational totals. A failed page must not become a zero-valued report.
+async function readAll<T>(query: {
+	range: (
+		from: number,
+		to: number
+	) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
+}) {
+	const data: T[] = [];
+	for (let from = 0; ; from += 500) {
+		const result = await query.range(from, from + 499);
+		if (result.error) return { data: null, error: result.error };
+		const rows = result.data ?? [];
+		data.push(...rows);
+		if (rows.length < 500) return { data, error: null };
+	}
+}
+
 export const load = async ({ locals, params, url }) => {
 	const access = await getWorkspaceAccess(locals, params.id);
 	if (!access) {
@@ -168,6 +186,8 @@ export const load = async ({ locals, params, url }) => {
 		if (!user) throw redirect(303, '/login');
 		throw redirect(303, `/workspace/${params.id}`);
 	}
+	if (params.section === 'new-property')
+		throw redirect(303, `/workspace/${params.id}/properties?new=1`);
 	const section = sections[params.section as keyof typeof sections];
 	if (params.section === 'portfolio') throw redirect(303, `/workspace/${params.id}/properties`);
 	if (!section) throw error(404, 'Workspace section not found');
@@ -198,84 +218,114 @@ export const load = async ({ locals, params, url }) => {
 		supportTickets,
 		supportTicketAttachments
 	] = await Promise.all([
-		locals.supabase
-			.from('properties')
-			.select(
-				'id, name, code, address_line_1, city, country, latitude, longitude, status, rental_mode'
-			)
-			.eq('organization_id', params.id)
-			.order('name'),
-		locals.supabase
-			.from('spaces')
-			.select(
-				'id, property_id, parent_space_id, name, code, kind, status, bedrooms, bathrooms, capacity, floor_label, area_sqm, monthly_rent, deposit_amount'
-			)
-			.eq('organization_id', params.id)
-			.order('created_at'),
-		locals.supabase
-			.from('people')
-			.select(
-				'id, user_id, person_type, first_name, last_name, email, phone, id_number, date_of_birth, address_line_1, city, country, notes'
-			)
-			.eq('organization_id', params.id)
-			.order('first_name'),
-		locals.supabase
-			.from('tenancies')
-			.select(
-				'id, space_id, lease_reference, status, start_date, end_date, rent_amount, deposit_amount, billing_frequency, rent_due_day, notice_period_days, move_in_at, move_out_at, notes'
-			)
-			.eq('organization_id', params.id)
-			.order('start_date', { ascending: false }),
-		locals.supabase.from('tenancy_parties').select('tenancy_id, person_id, role'),
-		locals.supabase
-			.from('charges')
-			.select(
-				'id, tenancy_id, charge_type, description, amount, due_on, status, utility_provider, utility_account_reference, billing_period_start, billing_period_end, notes, created_at'
-			)
-			.eq('organization_id', params.id)
-			.order('due_on', { ascending: false }),
-		locals.supabase
-			.from('payments')
-			.select('id, tenancy_id, payer_person_id, amount, payment_date, method, reference, notes')
-			.eq('organization_id', params.id)
-			.order('payment_date', { ascending: false }),
-		locals.supabase
-			.from('payment_allocations')
-			.select('payment_id, charge_id, amount, created_at')
-			.order('created_at', { ascending: false }),
-		locals.supabase
-			.from('property_expenses')
-			.select(
-				'id, property_id, space_id, vendor_id, category, description, amount, expense_date, reference, notes, payment_status, approval_status, created_at'
-			)
-			.eq('organization_id', params.id)
-			.order('expense_date', { ascending: false }),
-		locals.supabase
-			.from('maintenance_requests')
-			.select(
-				'id, property_id, space_id, title, description, category, source, priority, status, reporter_person_id, assigned_person_id, vendor_id, estimated_cost, actual_cost, reported_at, scheduled_for, sla_due_at, resolution_notes, completed_at, created_at, updated_at'
-			)
-			.eq('organization_id', params.id)
-			.order('created_at', { ascending: false }),
-		locals.supabase
-			.from('maintenance_updates')
-			.select('id, request_id, author_user_id, body, status, created_at')
-			.eq('organization_id', params.id)
-			.order('created_at', { ascending: false }),
-		locals.supabase
-			.from('maintenance_vendors')
-			.select(
-				'id, business_name, contact_name, email, phone, specialties, resource_type, status, emergency_available, hourly_rate, notes, created_at, updated_at'
-			)
-			.eq('organization_id', params.id)
-			.order('business_name'),
-		locals.supabase
-			.from('maintenance_plans')
-			.select(
-				'id, property_id, space_id, vendor_id, title, description, category, frequency_unit, interval_count, next_due_on, last_run_on, priority, estimated_cost, active, created_at, updated_at'
-			)
-			.eq('organization_id', params.id)
-			.order('next_due_on'),
+		readAll(
+			locals.supabase
+				.from('properties')
+				.select(
+					'id, name, code, address_line_1, city, country, latitude, longitude, status, rental_mode'
+				)
+				.eq('organization_id', params.id)
+				.order('name')
+		),
+		readAll(
+			locals.supabase
+				.from('spaces')
+				.select(
+					'id, property_id, parent_space_id, name, code, kind, status, bedrooms, bathrooms, capacity, floor_label, area_sqm, monthly_rent, deposit_amount'
+				)
+				.eq('organization_id', params.id)
+				.order('created_at')
+		),
+		readAll(
+			locals.supabase
+				.from('people')
+				.select(
+					'id, user_id, person_type, first_name, last_name, email, phone, id_number, date_of_birth, address_line_1, city, country, notes'
+				)
+				.eq('organization_id', params.id)
+				.order('first_name')
+		),
+		readAll(
+			locals.supabase
+				.from('tenancies')
+				.select(
+					'id, space_id, lease_reference, status, start_date, end_date, rent_amount, deposit_amount, billing_frequency, rent_due_day, notice_period_days, move_in_at, move_out_at, notice_given_on, expected_move_out_on, inspection_notes, deposit_refund_amount, deposit_deduction_amount, settlement_notes, notes'
+				)
+				.eq('organization_id', params.id)
+				.order('start_date', { ascending: false })
+		),
+		readAll(
+			locals.supabase
+				.from('tenancy_parties')
+				.select('tenancy_id, person_id, role')
+				.order('tenancy_id')
+				.order('person_id')
+		),
+		readAll(
+			locals.supabase
+				.from('charges')
+				.select(
+					'id, tenancy_id, charge_type, description, amount, due_on, status, utility_provider, utility_account_reference, billing_period_start, billing_period_end, notes, created_at'
+				)
+				.eq('organization_id', params.id)
+				.order('due_on', { ascending: false })
+		),
+		readAll(
+			locals.supabase
+				.from('payments')
+				.select('id, tenancy_id, payer_person_id, amount, payment_date, method, reference, notes')
+				.eq('organization_id', params.id)
+				.order('payment_date', { ascending: false })
+		),
+		readAll(
+			locals.supabase
+				.from('payment_allocations')
+				.select('payment_id, charge_id, amount, created_at')
+				.order('created_at', { ascending: false })
+		),
+		readAll(
+			locals.supabase
+				.from('property_expenses')
+				.select(
+					'id, property_id, space_id, vendor_id, category, description, amount, expense_date, reference, notes, payment_status, approval_status, created_at'
+				)
+				.eq('organization_id', params.id)
+				.order('expense_date', { ascending: false })
+		),
+		readAll(
+			locals.supabase
+				.from('maintenance_requests')
+				.select(
+					'id, property_id, space_id, title, description, category, source, priority, status, reporter_person_id, assigned_person_id, vendor_id, estimated_cost, actual_cost, reported_at, scheduled_for, sla_due_at, resolution_notes, cost_approved_by, cost_approved_at, completed_at, created_at, updated_at'
+				)
+				.eq('organization_id', params.id)
+				.order('created_at', { ascending: false })
+		),
+		readAll(
+			locals.supabase
+				.from('maintenance_updates')
+				.select('id, request_id, author_user_id, body, status, created_at')
+				.eq('organization_id', params.id)
+				.order('created_at', { ascending: false })
+		),
+		readAll(
+			locals.supabase
+				.from('maintenance_vendors')
+				.select(
+					'id, business_name, contact_name, email, phone, specialties, resource_type, status, emergency_available, hourly_rate, notes, created_at, updated_at'
+				)
+				.eq('organization_id', params.id)
+				.order('business_name')
+		),
+		readAll(
+			locals.supabase
+				.from('maintenance_plans')
+				.select(
+					'id, property_id, space_id, vendor_id, title, description, category, frequency_unit, interval_count, next_due_on, last_run_on, priority, estimated_cost, active, created_at, updated_at'
+				)
+				.eq('organization_id', params.id)
+				.order('next_due_on')
+		),
 		locals.supabase
 			.from('maintenance_plan_runs')
 			.select('id, plan_id, request_id, scheduled_for, generated_at')
@@ -294,12 +344,14 @@ export const load = async ({ locals, params, url }) => {
 			.select('id, request_id, reminder_type, due_at, created_at, acknowledged_at')
 			.eq('organization_id', params.id)
 			.order('due_at'),
-		locals.supabase
-			.from('collection_followups')
-			.select('id, tenancy_id, charge_id, status, next_action_on, notes, created_at, updated_at')
-			.eq('organization_id', params.id)
-			.order('next_action_on', { ascending: true, nullsFirst: false })
-			.order('created_at', { ascending: false }),
+		readAll(
+			locals.supabase
+				.from('collection_followups')
+				.select('id, tenancy_id, charge_id, status, next_action_on, notes, created_at, updated_at')
+				.eq('organization_id', params.id)
+				.order('next_action_on', { ascending: true, nullsFirst: false })
+				.order('created_at', { ascending: false })
+		),
 		locals.supabase
 			.from('organization_members')
 			.select('user_id, role, created_at')
@@ -333,7 +385,9 @@ export const load = async ({ locals, params, url }) => {
 			.limit(50),
 		locals.supabase
 			.from('support_tickets')
-			.select('id, subject, description, category, priority, status, created_at, updated_at, resolved_at')
+			.select(
+				'id, subject, description, category, priority, status, created_at, updated_at, resolved_at'
+			)
 			.eq('organization_id', params.id)
 			.order('created_at', { ascending: false }),
 		locals.supabase
@@ -341,6 +395,25 @@ export const load = async ({ locals, params, url }) => {
 			.select('id, ticket_id, file_name, storage_path, mime_type, file_size, created_at')
 			.order('created_at', { ascending: false })
 	]);
+	if (
+		[
+			properties,
+			spaces,
+			people,
+			tenancies,
+			parties,
+			charges,
+			payments,
+			paymentAllocations,
+			propertyExpenses,
+			maintenance,
+			workspaceSettings
+		].some((result) => result.error)
+	)
+		throw error(
+			503,
+			'Workspace records could not be loaded. Check the database migrations and try again.'
+		);
 	const attachmentRows = maintenanceAttachments.data ?? [];
 	const signedAttachments = attachmentRows.length
 		? await locals.supabase.storage.from('maintenance-attachments').createSignedUrls(
@@ -376,6 +449,15 @@ export const load = async ({ locals, params, url }) => {
 	const signedSupportUrlByPath = new Map(
 		(signedSupportAttachments.data ?? []).map((item) => [item.path, item.signedUrl])
 	);
+	const auditResult =
+		params.section === 'reports' && canManageWorkspace(access.membership.role)
+			? await locals.supabase
+					.from('audit_logs')
+					.select('id, actor_user_id, action, entity_type, entity_id, created_at, metadata')
+					.eq('organization_id', params.id)
+					.order('created_at', { ascending: false })
+					.limit(100)
+			: { data: [], error: null };
 	const requestedProfileId = url.searchParams.get('person');
 	const profileId =
 		params.section === 'tenants' &&
@@ -390,6 +472,8 @@ export const load = async ({ locals, params, url }) => {
 		...access,
 		sectionKey: params.section,
 		profileId,
+		auditEntries: auditResult.data ?? [],
+		auditUnavailable: Boolean(auditResult.error),
 		section,
 		properties: properties.data ?? [],
 		spaces: spaces.data ?? [],
@@ -432,7 +516,9 @@ export const actions = {
 	createSupportTicket: async ({ request, locals, params }) => {
 		const access = await getWorkspaceAccess(locals, params.id);
 		if (!access || access.supportMode)
-			return fail(403, { message: 'An active workspace membership is required to contact support.' });
+			return fail(403, {
+				message: 'An active workspace membership is required to contact support.'
+			});
 		const form = await request.formData();
 		const subject = value(form, 'subject');
 		const description = value(form, 'description');
@@ -451,7 +537,11 @@ export const actions = {
 			return fail(400, { message: 'Add no more than five screenshots or files to one ticket.' });
 		if (attachments.some((file) => file.size > 10 * 1024 * 1024))
 			return fail(400, { message: 'Each attachment must be 10 MB or smaller.' });
-		if (attachments.some((file) => !['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(file.type)))
+		if (
+			attachments.some(
+				(file) => !['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(file.type)
+			)
+		)
 			return fail(400, { message: 'Only JPG, PNG, WebP, and PDF attachments are supported.' });
 		const { data: ticket, error: insertError } = await locals.supabase
 			.from('support_tickets')
@@ -466,7 +556,9 @@ export const actions = {
 			.select('id')
 			.single();
 		if (insertError || !ticket)
-			return fail(400, { message: insertError?.message ?? 'Your support ticket could not be sent.' });
+			return fail(400, {
+				message: insertError?.message ?? 'Your support ticket could not be sent.'
+			});
 		const uploadedPaths: string[] = [];
 		let attachmentWarning: string | null = null;
 		for (const file of attachments) {
@@ -479,10 +571,16 @@ export const actions = {
 				break;
 			}
 			uploadedPaths.push(storagePath);
-			const { error: attachmentError } = await locals.supabase.from('support_ticket_attachments').insert({
-				ticket_id: ticket.id, uploaded_by: access.user.id, file_name: file.name,
-				storage_path: storagePath, mime_type: file.type, file_size: file.size
-			});
+			const { error: attachmentError } = await locals.supabase
+				.from('support_ticket_attachments')
+				.insert({
+					ticket_id: ticket.id,
+					uploaded_by: access.user.id,
+					file_name: file.name,
+					storage_path: storagePath,
+					mime_type: file.type,
+					file_size: file.size
+				});
 			if (attachmentError) {
 				await locals.supabase.storage.from('support-ticket-attachments').remove([storagePath]);
 				attachmentWarning = `The ticket was sent, but ${file.name} could not be attached.`;
@@ -702,8 +800,15 @@ export const actions = {
 			numberOrNull(form.get('notice_period_days')) ??
 			workspaceSettings?.default_notice_period_days ??
 			30;
-		const autoInvoice = workspaceSettings?.auto_generate_rent_invoices ?? true;
-		const invoiceLeadDays = workspaceSettings?.default_invoice_lead_days ?? 7;
+		const termsError = validateLeaseTerms(
+			startDate,
+			value(form, 'end_date'),
+			billingFrequency,
+			rentDueDay,
+			numberOrNull(form.get('deposit_amount')),
+			noticePeriodDays
+		);
+		if (termsError) return fail(400, { message: termsError });
 		const status = form.has('checked_in') ? 'active' : 'draft';
 		if (!firstName || !lastName || !spaceId || !startDate || rent === null || rent < 0)
 			return fail(400, { message: 'Enter the tenant, space, start date, and rent.' });
@@ -711,122 +816,28 @@ export const actions = {
 			return fail(400, { message: 'Choose a valid billing frequency.' });
 		if (form.has('checked_in') && startDate > new Date().toISOString().slice(0, 10))
 			return fail(400, { message: 'A checked-in tenant cannot have a future start date.' });
-		const { data: space } = await locals.supabase
-			.from('spaces')
-			.select('id, property_id, status')
-			.eq('id', spaceId)
-			.eq('organization_id', params.id)
-			.maybeSingle();
-		if (!space) return fail(404, { message: 'The selected rentable space was not found.' });
-		if (space.status !== 'vacant')
-			return fail(409, { message: 'Choose a vacant rentable space. Occupied, reserved, and inactive spaces cannot be assigned to a new tenant.' });
-		const { data: existingTenancy } = await locals.supabase
-			.from('tenancies')
-			.select('id')
-			.eq('organization_id', params.id)
-			.eq('space_id', spaceId)
-			.eq('status', 'active')
-			.maybeSingle();
-		if (existingTenancy) return fail(409, { message: 'This space already has an active tenancy.' });
-		const { data: person, error: personError } = await locals.supabase
-			.from('people')
-			.insert({
-				organization_id: params.id,
-				person_type: 'tenant',
-				first_name: firstName,
-				last_name: lastName,
-				email: value(form, 'email') || null,
-				phone: value(form, 'phone') || null,
-				id_number: value(form, 'id_number') || null,
-				date_of_birth: value(form, 'date_of_birth') || null,
-				address_line_1: value(form, 'address_line_1') || null,
-				city: value(form, 'city') || null,
-				country: value(form, 'country') || null,
-				notes: value(form, 'person_notes') || null
-			})
-			.select('id')
-			.single();
-		if (personError || !person)
-			return fail(400, { message: personError?.message ?? 'Could not create the tenant profile.' });
-		const { data: tenancy, error: tenancyError } = await locals.supabase
-			.from('tenancies')
-			.insert({
-				organization_id: params.id,
-				space_id: spaceId,
-				lease_reference: value(form, 'lease_reference') || null,
-				start_date: startDate,
-				end_date: value(form, 'end_date') || null,
-				status,
+		const { error: onboardingError } = await locals.supabase.rpc('onboard_tenant', {
+			target_org: params.id,
+			payload: {
+				...Object.fromEntries(form),
+				submission_key: value(form, 'submission_key') || randomUUID(),
 				rent_amount: rent,
 				deposit_amount: numberOrNull(form.get('deposit_amount')) ?? 0,
-				billing_frequency: billingFrequency,
+				deposit_received: numberOrNull(form.get('deposit_received')) ?? 0,
 				rent_due_day: rentDueDay,
 				notice_period_days: noticePeriodDays,
-				move_in_at: status === 'active' ? new Date().toISOString() : null,
-				notes: value(form, 'lease_notes') || null
-			})
-			.select('id')
-			.single();
-		if (tenancyError || !tenancy) {
-			await locals.supabase
-				.from('people')
-				.delete()
-				.eq('id', person.id)
-				.eq('organization_id', params.id);
-			return fail(400, { message: tenancyError?.message ?? 'Could not create the tenancy.' });
-		}
-		const partyResult = await locals.supabase
-			.from('tenancy_parties')
-			.insert({ tenancy_id: tenancy.id, person_id: person.id, role: 'primary' });
-		const scheduleResult = await locals.supabase.from('charge_schedules').insert({
-			organization_id: params.id,
-			tenancy_id: tenancy.id,
-			description: 'Rent',
-			amount: rent,
-			frequency: billingFrequency,
-			due_day: rentDueDay,
-			next_due_on: firstRentDueDate(startDate, rentDueDay, billingFrequency),
-			auto_invoice: autoInvoice,
-			invoice_lead_days: invoiceLeadDays
+				billing_frequency: billingFrequency,
+				checked_in: status === 'active',
+				first_due_on: firstRentDueDate(startDate, rentDueDay, billingFrequency)
+			}
 		});
-		if (partyResult.error || scheduleResult.error) {
-			await locals.supabase
-				.from('tenancies')
-				.delete()
-				.eq('id', tenancy.id)
-				.eq('organization_id', params.id);
-			await locals.supabase
-				.from('people')
-				.delete()
-				.eq('id', person.id)
-				.eq('organization_id', params.id);
-			return fail(400, {
-				message:
-					partyResult.error?.message ??
-					scheduleResult.error?.message ??
-					'Could not create the rent schedule.'
-			});
-		}
-		if (status === 'active')
-			await locals.supabase
-				.from('spaces')
-				.update({ status: 'occupied' })
-				.eq('id', spaceId)
-				.eq('organization_id', params.id);
-		await writeAuditLog(locals, {
-			actorUserId: access.user.id,
-			organizationId: params.id,
-			action: 'tenant_onboarded',
-			entityType: 'tenancy',
-			entityId: tenancy.id,
-			metadata: { personId: person.id, spaceId, checkedIn: status === 'active' }
-		});
+		if (onboardingError) return fail(400, { message: onboardingError.message });
 		return {
 			success: true,
 			message:
 				status === 'active'
-					? 'Tenant added and checked in.'
-					: 'Tenant profile and lease saved as a draft.'
+					? 'Tenant checked in. Deposit and first rent charge recorded; recurring schedule is ready.'
+					: 'Tenant and lease saved as a draft. Complete check-in to start billing.'
 		};
 	},
 	updatePerson: async ({ request, locals, params }) => {
@@ -877,121 +888,63 @@ export const actions = {
 			!['draft', 'active', 'ending_soon', 'expired', 'terminated', 'completed'].includes(status)
 		)
 			return fail(400, { message: 'Enter a valid lease status and rent.' });
-		const { data: tenancy } = await locals.supabase
-			.from('tenancies')
-			.select('id, space_id, move_in_at')
-			.eq('id', tenancyId)
-			.eq('organization_id', params.id)
-			.maybeSingle();
-		if (!tenancy) return fail(404, { message: 'The selected tenancy was not found.' });
-		const moveInAt =
-			status === 'active' ? (tenancy.move_in_at ?? new Date().toISOString()) : tenancy.move_in_at;
-		const { error: updateError } = await locals.supabase
-			.from('tenancies')
-			.update({
-				status,
-				start_date: value(form, 'start_date'),
-				end_date: value(form, 'end_date') || null,
+		const termsError = validateLeaseTerms(
+			value(form, 'start_date'),
+			value(form, 'end_date'),
+			value(form, 'billing_frequency') || 'monthly',
+			numberOrNull(form.get('rent_due_day')),
+			numberOrNull(form.get('deposit_amount')),
+			numberOrNull(form.get('notice_period_days'))
+		);
+		if (termsError) return fail(400, { message: termsError });
+		if (
+			['active', 'ending_soon'].includes(status) &&
+			value(form, 'start_date') > new Date().toISOString().slice(0, 10)
+		)
+			return fail(400, { message: 'A checked-in lease cannot start in the future.' });
+		const { error: leaseError } = await locals.supabase.rpc('save_lease_terms', {
+			target_org: params.id,
+			target_lease: tenancyId,
+			payload: {
+				...Object.fromEntries(form),
 				rent_amount: rent,
-				deposit_amount: numberOrNull(form.get('deposit_amount')) ?? 0,
 				billing_frequency: value(form, 'billing_frequency') || 'monthly',
-				rent_due_day: numberOrNull(form.get('rent_due_day')),
-				notice_period_days: numberOrNull(form.get('notice_period_days')),
-				move_in_at: moveInAt,
-				notes: value(form, 'notes') || null
-			})
-			.eq('id', tenancyId)
-			.eq('organization_id', params.id);
-		if (updateError) return fail(400, { message: updateError.message });
-		await locals.supabase
-			.from('charge_schedules')
-			.update({
-				amount: rent,
-				frequency: value(form, 'billing_frequency') || 'monthly',
-				due_day: numberOrNull(form.get('rent_due_day')),
-				active: status === 'active'
-			})
-			.eq('tenancy_id', tenancyId)
-			.eq('organization_id', params.id)
-			.eq('description', 'Rent');
-		const { count: activeTenancies } = await locals.supabase
-			.from('tenancies')
-			.select('id', { count: 'exact', head: true })
-			.eq('organization_id', params.id)
-			.eq('space_id', tenancy.space_id)
-			.eq('status', 'active');
-		await locals.supabase
-			.from('spaces')
-			.update({ status: activeTenancies ? 'occupied' : 'vacant' })
-			.eq('id', tenancy.space_id)
-			.eq('organization_id', params.id);
-		await writeAuditLog(locals, {
-			actorUserId: access.user.id,
-			organizationId: params.id,
-			action: 'lease_details_updated',
-			entityType: 'tenancy',
-			entityId: tenancyId,
-			metadata: { status, rent }
+				first_due_on: firstRentDueDate(
+					value(form, 'start_date'),
+					numberOrNull(form.get('rent_due_day')),
+					value(form, 'billing_frequency') || 'monthly'
+				)
+			}
 		});
-		return { success: true, message: 'Lease details updated.' };
+		if (leaseError) return fail(400, { message: leaseError.message });
+		return { success: true, message: 'Lease and rent schedule updated together.' };
 	},
-	endTenancy: async ({ request, locals, params }) => {
+	leaseLifecycle: async ({ request, locals, params }) => {
 		const access = await getManagedAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
-		const tenancyId = value(form, 'tenancy_id');
-		const moveOutDate = value(form, 'move_out_date');
-		const reason = value(form, 'reason');
-		if (!tenancyId || !moveOutDate)
-			return fail(400, { message: 'Choose a tenancy and move-out date.' });
-		const { data: tenancy } = await locals.supabase
-			.from('tenancies')
-			.select('id, space_id, notes')
-			.eq('id', tenancyId)
-			.eq('organization_id', params.id)
-			.maybeSingle();
-		if (!tenancy) return fail(404, { message: 'The selected tenancy was not found.' });
-		const { error: updateError } = await locals.supabase
-			.from('tenancies')
-			.update({
-				status: 'completed',
-				end_date: moveOutDate,
-				move_out_at: `${moveOutDate}T00:00:00.000Z`,
-				notes: [tenancy.notes, reason ? `Move-out: ${reason}` : 'Move-out recorded.']
-					.filter(Boolean)
-					.join('\\n')
-			})
-			.eq('id', tenancyId)
-			.eq('organization_id', params.id);
-		if (updateError) return fail(400, { message: updateError.message });
-		const { count } = await locals.supabase
-			.from('tenancies')
-			.select('id', { count: 'exact', head: true })
-			.eq('organization_id', params.id)
-			.eq('space_id', tenancy.space_id)
-			.eq('status', 'active');
-		if (!count)
-			await locals.supabase
-				.from('spaces')
-				.update({ status: 'vacant' })
-				.eq('id', tenancy.space_id)
-				.eq('organization_id', params.id);
-		await locals.supabase
-			.from('charge_schedules')
-			.update({ active: false })
-			.eq('tenancy_id', tenancyId)
-			.eq('organization_id', params.id)
-			.eq('description', 'Rent');
-		await writeAuditLog(locals, {
-			actorUserId: access.user.id,
-			organizationId: params.id,
-			action: 'tenancy_completed',
-			entityType: 'tenancy',
-			entityId: tenancyId,
-			metadata: { moveOutDate, reason }
+		const operation = value(form, 'operation');
+		if (!['renew', 'notice', 'move_out'].includes(operation))
+			return fail(400, { message: 'Choose a lease operation.' });
+		const { error: lifecycleError } = await locals.supabase.rpc('transition_lease', {
+			target_org: params.id,
+			target_lease: value(form, 'tenancy_id'),
+			operation,
+			payload: Object.fromEntries(form)
 		});
-		return { success: true, message: 'Tenancy closed and the space is available for re-letting.' };
+		if (lifecycleError) return fail(400, { message: lifecycleError.message });
+		return {
+			success: true,
+			message:
+				operation === 'move_out'
+					? 'Move-out and settlement recorded. Rent automation stopped and the space released. Process any agreed refund using your payment provider.'
+					: operation === 'renew'
+						? 'Lease renewed; previous terms remain in the audit history.'
+						: 'Notice recorded; occupancy and rent continue until move-out.'
+		};
 	},
+	endTenancy: async () =>
+		fail(400, { message: 'Use the lease move-out checklist to record inspection and settlement.' }),
 	updateDocumentApproval: async ({ request, locals, params }) => {
 		const access = await getManagedAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
@@ -1187,6 +1140,44 @@ export const actions = {
 					: 'Charge added to the collection ledger.'
 		};
 	},
+	generateRentCharges: async ({ locals, params }) => {
+		const access = await getFinanceAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Finance or manager access required.' });
+		const { data: generated, error: rentError } = await locals.supabase.rpc(
+			'generate_workspace_rent',
+			{ target_org: params.id }
+		);
+		if (rentError) return fail(400, { message: rentError.message });
+		return {
+			success: true,
+			message:
+				String(generated ?? 0) +
+				' rent invoices generated from enabled schedules. Existing charges and invoices were preserved.'
+		};
+	},
+	resolveCollectionFollowup: async ({ request, locals, params }) => {
+		const access = await getFinanceAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Finance or manager access required.' });
+		const form = await request.formData();
+		const { data: followup, error: followupError } = await locals.supabase
+			.from('collection_followups')
+			.update({ status: 'resolved' })
+			.eq('organization_id', params.id)
+			.eq('id', value(form, 'followup_id'))
+			.in('status', ['open', 'promised'])
+			.select('id')
+			.maybeSingle();
+		if (followupError || !followup)
+			return fail(400, { message: followupError?.message ?? 'Open follow-up not found.' });
+		await writeAuditLog(locals, {
+			actorUserId: access.user.id,
+			organizationId: params.id,
+			action: 'collection_followup_resolved',
+			entityType: 'collection_followup',
+			entityId: followup.id
+		});
+		return { success: true, message: 'Follow-up resolved. The charge ledger is unchanged.' };
+	},
 	recordPayment: async ({ request, locals, params }) => {
 		const access = await getFinanceAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Finance or manager access is required.' });
@@ -1194,89 +1185,25 @@ export const actions = {
 		const amount = numberOrNull(form.get('amount'));
 		if (amount === null || amount <= 0 || !value(form, 'payment_date'))
 			return fail(400, { message: 'Enter a payment amount and date.' });
-		const { data: payment, error: insertError } = await locals.supabase
-			.from('payments')
-			.insert({
-				organization_id: params.id,
-				tenancy_id: value(form, 'tenancy_id') || null,
-				payer_person_id: value(form, 'payer_person_id') || null,
+		const { error: paymentError } = await locals.supabase.rpc('record_workspace_payment', {
+			target_org: params.id,
+			payload: {
+				...Object.fromEntries(form),
 				amount,
-				payment_date: value(form, 'payment_date'),
-				method: value(form, 'method') || 'manual',
-				reference: value(form, 'reference') || null,
-				notes: value(form, 'notes') || null
-			})
-			.select('id, amount, tenancy_id, payer_person_id, payment_date, reference')
-			.single();
-		if (insertError) return fail(400, { message: insertError.message });
-		let allocatedAmount = 0;
-		let allocationWarning = '';
-		if (payment?.tenancy_id && form.has('auto_allocate')) {
-			const allocation = await locals.supabase.rpc('allocate_payment_to_oldest_charges', {
-				target_payment_id: payment.id
-			});
-			if (allocation.error)
-				allocationWarning = ` Automatic allocation needs review: ${allocation.error.message}`;
-			else allocatedAmount = Number(allocation.data ?? 0);
-		}
-		if (form.has('generate_receipt') && payment) {
-			const [{ data: setting }, { data: person }] = await Promise.all([
-				locals.supabase
-					.from('organization_workspace_settings')
-					.select('receipt_prefix, send_payment_receipts')
-					.eq('organization_id', params.id)
-					.maybeSingle(),
-				payment.payer_person_id
-					? locals.supabase
-							.from('people')
-							.select('id, email')
-							.eq('id', payment.payer_person_id)
-							.maybeSingle()
-					: Promise.resolve({ data: null })
-			]);
-			const { error: receiptError } = await locals.supabase.from('billing_documents').insert({
-				organization_id: params.id,
-				document_type: 'receipt',
-				document_number: newDocumentNumber(
-					setting?.receipt_prefix ?? 'RCT',
-					new Date().getFullYear()
-				),
-				tenancy_id: payment.tenancy_id,
-				person_id: person?.id ?? null,
-				payment_id: payment.id,
-				issue_date: payment.payment_date,
-				status: 'paid',
-				currency_code: access.organization.currency_code,
-				subtotal: payment.amount,
-				total_amount: payment.amount,
-				line_items: [
-					{
-						description: payment.reference || 'Rental payment',
-						quantity: 1,
-						amount: payment.amount
-					}
-				],
-				created_by: access.user.id
-			});
-			if (receiptError)
-				return fail(400, {
-					message: `Payment recorded, but receipt generation failed: ${receiptError.message}`
-				});
-			if (setting?.send_payment_receipts !== false && person?.email)
-				await locals.supabase.from('notification_outbox').insert({
-					organization_id: params.id,
-					recipient_address: person.email,
-					channel: 'email',
-					event_type: 'payment_receipt_issued',
-					payload: { payment_id: payment.id, amount: payment.amount },
-					idempotency_key: `receipt:${payment.id}`
-				});
-		}
+				submission_key: value(form, 'submission_key') || randomUUID(),
+				auto_allocate: form.has('auto_allocate'),
+				generate_receipt: form.has('generate_receipt')
+			}
+		});
+		if (paymentError) return fail(400, { message: paymentError.message });
 		return {
 			success: true,
-			message: form.has('generate_receipt')
-				? `Payment recorded${allocatedAmount ? ` and ${access.organization.currency_code} ${allocatedAmount.toFixed(2)} allocated` : ''} and receipt generated.${allocationWarning}`
-				: `Payment recorded${allocatedAmount ? ` and ${access.organization.currency_code} ${allocatedAmount.toFixed(2)} allocated` : ''}.${allocationWarning}`
+			message:
+				'Payment saved.' +
+				(form.has('auto_allocate')
+					? ' Allocated to available charges; any excess remains as credit.'
+					: '') +
+				(form.has('generate_receipt') ? ' Receipt generated.' : '')
 		};
 	},
 	addExpense: async ({ request, locals, params }) => {
@@ -1680,7 +1607,8 @@ export const actions = {
 			.eq('organization_id', params.id)
 			.maybeSingle();
 		if (lookupError || !task) return fail(404, { message: 'Maintenance task not found.' });
-		if (!task.scheduled_for) return fail(400, { message: 'Plan a start date before beginning this task.' });
+		if (!task.scheduled_for)
+			return fail(400, { message: 'Plan a start date before beginning this task.' });
 		const { error } = await locals.supabase
 			.from('maintenance_requests')
 			.update({ status: 'in_progress' })
@@ -1705,8 +1633,7 @@ export const actions = {
 		const { error } = await locals.supabase
 			.from('maintenance_requests')
 			.update({
-				status: 'completed',
-				completed_at: new Date().toISOString(),
+				status: 'awaiting_approval',
 				resolution_notes: value(form, 'resolution_notes') || null,
 				actual_cost: numberOrNull(form.get('actual_cost'))
 			})
@@ -1720,7 +1647,11 @@ export const actions = {
 			entityType: 'maintenance_request',
 			entityId: requestId
 		});
-		return { success: true, message: 'Maintenance task completed and moved to history.' };
+		return {
+			success: true,
+			message:
+				'Work submitted for review. Approve the cost and complete the request after checking the evidence.'
+		};
 	},
 	updateMaintenanceRequest: async ({ request, locals, params }) => {
 		const access = await getMaintenanceAccess(locals, params.id);
@@ -1744,18 +1675,36 @@ export const actions = {
 				status,
 				category,
 				priority,
-				assigned_person_id: null,
+				assigned_person_id: value(form, 'assigned_person_id') || null,
 				vendor_id: value(form, 'vendor_id') || null,
 				scheduled_for: value(form, 'scheduled_for') || null,
-				estimated_cost: numberOrNull(form.get('estimated_cost')),
-				actual_cost: numberOrNull(form.get('actual_cost')),
-				resolution_notes: value(form, 'resolution_notes') || null,
+				...(form.has('estimated_cost')
+					? { estimated_cost: numberOrNull(form.get('estimated_cost')) }
+					: {}),
+				...(form.has('actual_cost') ? { actual_cost: numberOrNull(form.get('actual_cost')) } : {}),
+				...(form.has('resolution_notes')
+					? { resolution_notes: value(form, 'resolution_notes') || null }
+					: {}),
 				completed_at: ['completed', 'closed'].includes(status) ? new Date().toISOString() : null
 			})
 			.eq('id', requestId)
 			.eq('organization_id', params.id);
 		if (updateError) return fail(400, { message: updateError.message });
 		return { success: true, message: 'Maintenance request updated.' };
+	},
+	approveMaintenanceCost: async ({ request, locals, params }) => {
+		const access = await getFinanceAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Finance or manager approval required.' });
+		const form = await request.formData();
+		const { error: approvalError } = await locals.supabase.rpc('approve_maintenance_cost', {
+			target_org: params.id,
+			target_request: value(form, 'request_id')
+		});
+		if (approvalError) return fail(400, { message: approvalError.message });
+		return {
+			success: true,
+			message: 'Actual cost approved. Review the evidence, then mark the request completed.'
+		};
 	},
 	addMaintenanceUpdate: async ({ request, locals, params }) => {
 		const access = await getMaintenanceAccess(locals, params.id);
@@ -1832,14 +1781,21 @@ export const actions = {
 			.eq('organization_id', params.id)
 			.maybeSingle();
 		if (!attachment) return fail(404, { message: 'Attachment not found.' });
-		await locals.supabase.storage.from('maintenance-attachments').remove([attachment.storage_path]);
 		const { error: deleteError } = await locals.supabase
 			.from('maintenance_attachments')
 			.delete()
 			.eq('id', attachment.id)
 			.eq('organization_id', params.id);
 		if (deleteError) return fail(400, { message: deleteError.message });
-		return { success: true, message: 'Attachment removed.' };
+		const cleanup = await locals.supabase.storage
+			.from('maintenance-attachments')
+			.remove([attachment.storage_path]);
+		return {
+			success: true,
+			message: cleanup.error
+				? 'Attachment record removed. Storage cleanup needs a retry by an administrator.'
+				: 'Attachment removed.'
+		};
 	},
 	createMaintenanceVendor: async ({ request, locals, params }) => {
 		const access = await getMaintenanceAccess(locals, params.id);
@@ -1871,7 +1827,10 @@ export const actions = {
 			notes: value(form, 'notes') || null
 		});
 		if (insertError) return fail(400, { message: insertError.message });
-		return { success: true, message: `${businessName} was added to the maintenance resource directory.` };
+		return {
+			success: true,
+			message: `${businessName} was added to the maintenance resource directory.`
+		};
 	},
 	updateMaintenanceVendor: async ({ request, locals, params }) => {
 		const access = await getMaintenanceAccess(locals, params.id);
@@ -2126,57 +2085,15 @@ export const actions = {
 		const access = await getFinanceAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Finance or manager access is required.' });
 		const paymentId = value(await request.formData(), 'payment_id');
-		const { data: payment } = await locals.supabase
-			.from('payments')
-			.select('id, tenancy_id, payer_person_id, amount, payment_date, reference')
-			.eq('id', paymentId)
-			.eq('organization_id', params.id)
-			.maybeSingle();
-		if (!payment) return fail(404, { message: 'Payment not found.' });
-		const [{ data: setting }, { data: person }] = await Promise.all([
-			locals.supabase
-				.from('organization_workspace_settings')
-				.select('receipt_prefix, send_payment_receipts')
-				.eq('organization_id', params.id)
-				.maybeSingle(),
-			payment.payer_person_id
-				? locals.supabase
-						.from('people')
-						.select('id, email')
-						.eq('id', payment.payer_person_id)
-						.maybeSingle()
-				: Promise.resolve({ data: null })
-		]);
-		const year = new Date().getFullYear();
-		const { error: documentError } = await locals.supabase.from('billing_documents').insert({
-			organization_id: params.id,
-			document_type: 'receipt',
-			document_number: newDocumentNumber(setting?.receipt_prefix ?? 'RCT', year),
-			tenancy_id: payment.tenancy_id,
-			person_id: person?.id ?? null,
-			payment_id: payment.id,
-			issue_date: payment.payment_date,
-			status: 'paid',
-			currency_code: access.organization.currency_code,
-			subtotal: payment.amount,
-			total_amount: payment.amount,
-			line_items: [
-				{ description: payment.reference || 'Rental payment', quantity: 1, amount: payment.amount }
-			],
-			created_by: access.user.id
+		const { error: receiptError } = await locals.supabase.rpc('issue_workspace_receipt', {
+			target_org: params.id,
+			target_payment: paymentId
 		});
-		if (documentError) return fail(400, { message: documentError.message });
-		if (setting?.send_payment_receipts !== false && person?.email) {
-			await locals.supabase.from('notification_outbox').insert({
-				organization_id: params.id,
-				recipient_address: person.email,
-				channel: 'email',
-				event_type: 'payment_receipt_issued',
-				payload: { payment_id: payment.id, amount: payment.amount },
-				idempotency_key: `receipt:${payment.id}`
-			});
-		}
-		return { success: true, message: 'Receipt generated and queued for delivery.' };
+		if (receiptError) return fail(400, { message: receiptError.message });
+		return {
+			success: true,
+			message: 'Receipt available. Repeated requests reuse the existing receipt.'
+		};
 	},
 	updateSettings: async ({ request, locals, params }) => {
 		const access = await getManagedAccess(locals, params.id);
@@ -2257,8 +2174,7 @@ export const actions = {
 		const confirmation = value(form, 'confirm_password');
 		if (newPassword.length < 8)
 			return fail(400, { message: 'Passwords must contain at least 8 characters.' });
-		if (newPassword !== confirmation)
-			return fail(400, { message: 'The passwords do not match.' });
+		if (newPassword !== confirmation) return fail(400, { message: 'The passwords do not match.' });
 		const changedAt = new Date().toISOString();
 		const { error: authError } = await locals.supabase.auth.updateUser({
 			password: newPassword,

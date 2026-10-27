@@ -1,7 +1,7 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { resolve } from '$app/paths';
-	import PortfolioMap from '$lib/components/PortfolioMap.svelte';
-
+	import PortfolioMap from './PortfolioMap.svelte';
+	import { coordinates, rentableSpaces } from '$lib/dashboard/portfolio';
 	type Property = {
 		id: string;
 		name: string;
@@ -17,481 +17,862 @@
 	type Space = {
 		id: string;
 		property_id: string;
+		parent_space_id?: string | null;
 		name: string;
 		kind: string;
 		status: string;
 		monthly_rent: number | string | null;
 	};
-
-	let { organization, properties, spaces } = $props<{
+	type Request = { id: string; property_id: string; status: string };
+	let {
+		organization,
+		properties,
+		spaces,
+		maintenance = [],
+		onAdd
+	} = $props<{
 		organization: { id: string; currency_code: string };
 		properties: Property[];
 		spaces: Space[];
+		maintenance?: Request[];
+		onAdd?: () => void;
 	}>();
-
-	const modeLabels: Record<string, string> = {
+	let view = $state<'cards' | 'table' | 'map'>('cards');
+	let search = $state('');
+	let status = $state('all');
+	let availability = $state('all');
+	let sort = $state('name');
+	const modes: Record<string, string> = {
 		whole_property: 'Whole property',
 		room_by_room: 'Room by room',
 		mixed: 'Mixed arrangement'
 	};
-
-	const spacesFor = (propertyId: string) =>
-		spaces.filter((space: Space) => space.property_id === propertyId);
-	const occupiedFor = (propertyId: string) =>
-		spacesFor(propertyId).filter((space: Space) => space.status === 'occupied').length;
-	const mappedCount = $derived(
-		properties.filter((property: Property) => property.latitude && property.longitude).length
+	const rentable = $derived(rentableSpaces<Space>(properties, spaces));
+	type PortfolioRow = Property & {
+		total: number;
+		occupied: number;
+		vacant: number;
+		requests: number;
+		pinned: boolean;
+	};
+	const rows: PortfolioRow[] = $derived(
+		properties.map((property: Property) => {
+			const units = rentable.filter((space: Space) => space.property_id === property.id);
+			return {
+				...property,
+				total: units.length,
+				occupied: units.filter((space: Space) => space.status === 'occupied').length,
+				vacant: units.filter((space: Space) => space.status === 'vacant').length,
+				requests: maintenance.filter(
+					(request: Request) =>
+						request.property_id === property.id && !['closed', 'completed'].includes(request.status)
+				).length,
+				pinned: coordinates(property) !== null
+			};
+		})
 	);
-	const occupiedCount = $derived(
-		spaces.filter((space: Space) => space.status === 'occupied').length
+	const filtered = $derived(
+		rows
+			.filter(
+				(row: PortfolioRow) =>
+					`${row.name} ${row.code ?? ''} ${row.address_line_1 ?? ''} ${row.city ?? ''} ${row.country ?? ''}`
+						.toLowerCase()
+						.includes(search.toLowerCase()) &&
+					(status === 'all' || row.status === status) &&
+					(availability === 'all' ||
+						(availability === 'vacant'
+							? row.vacant > 0
+							: availability === 'maintenance'
+								? row.requests > 0
+								: !row.pinned))
+			)
+			.sort((a: PortfolioRow, b: PortfolioRow) =>
+				sort === 'vacancies'
+					? b.vacant - a.vacant || a.name.localeCompare(b.name)
+					: sort === 'occupancy'
+						? (a.total ? a.occupied / a.total : 0) - (b.total ? b.occupied / b.total : 0) ||
+							a.name.localeCompare(b.name)
+						: a.name.localeCompare(b.name)
+			)
 	);
-	const vacantCount = $derived(spaces.filter((space: Space) => space.status === 'vacant').length);
-	let view = $state<'register' | 'map'>('register');
+	const occupied = $derived(rentable.filter((row: Space) => row.status === 'occupied').length);
+	const vacant = $derived(rentable.filter((row: Space) => row.status === 'vacant').length);
+	const active = $derived(properties.filter((row: Property) => row.status === 'active').length);
+	const pinned = $derived(properties.filter((row: Property) => coordinates(row) !== null).length);
+	const percent = (row: { total: number; occupied: number }) =>
+		row.total ? Math.round((row.occupied / row.total) * 100) : null;
+	function clear() {
+		search = '';
+		status = 'all';
+		availability = 'all';
+		sort = 'name';
+	}
 </script>
 
-<svelte:head><title>Properties · {organization.currency_code} · Musha</title></svelte:head>
-
-<section class="properties-page" aria-labelledby="properties-title">
-	<div class="page-heading">
+<svelte:head><title>Properties — Musha PMS</title></svelte:head>
+<section class="portfolio-browser" aria-labelledby="portfolio-title">
+	<header class="portfolio-heading">
 		<div>
-			<p class="eyebrow">Portfolio register</p>
-			<h2 id="properties-title">Your properties<span>.</span></h2>
-			<p class="intro-copy">
-				A calm overview of every location you manage. Open the registration flow when you are ready
-				to add another one.
-			</p>
+			<p class="eyebrow">WORKSPACE / YOUR PORTFOLIO</p>
+			<h1 id="portfolio-title">Every address.<em> A better perspective.</em></h1>
+			<p>Explore your properties, spot available spaces and see where care is needed.</p>
 		</div>
-		<a class="primary" href={resolve(`/workspace/${organization.id}/new-property`)}
-			>Add a property <span>→</span></a
+		<a
+			class="primary"
+			href={resolve(`/workspace/${organization.id}/new-property`)}
+			onclick={(event) => {
+				if (onAdd) {
+					event.preventDefault();
+					onAdd();
+				}
+			}}>+ Add property</a
+		>
+	</header>
+	<div class="portfolio-summary">
+		<div>
+			<span>Active properties</span><strong
+				>{active}<small>/ {properties.length} on record</small></strong
+			>
+		</div>
+		<div>
+			<span>Rentable spaces</span><strong
+				>{rentable.length}<small>{occupied} occupied</small></strong
+			>
+		</div>
+		<div><span>Available now</span><strong>{vacant}<small>vacant spaces</small></strong></div>
+		<div>
+			<span>Portfolio occupancy</span><strong
+				>{rentable.length ? `${Math.round((occupied / rentable.length) * 100)}%` : '—'}<small
+					>current space status</small
+				></strong
+			>
+		</div>
+	</div>
+	<div class="browser-controls">
+		<label class="search"
+			><span>Find a property</span><input
+				type="search"
+				bind:value={search}
+				placeholder="Search name, address or reference…"
+			/></label
+		><label
+			><span>Status</span><select bind:value={status}
+				><option value="all">All properties</option><option value="active">Active</option><option
+					value="inactive">Inactive</option
+				></select
+			></label
+		><label
+			><span>Focus on</span><select bind:value={availability}
+				><option value="all">Everything</option><option value="vacant">Has vacancies</option><option
+					value="maintenance">Needs maintenance</option
+				><option value="unmapped">Not yet mapped</option></select
+			></label
+		><label
+			><span>Sort by</span><select bind:value={sort}
+				><option value="name">Name A–Z</option><option value="vacancies">Most vacancies</option
+				><option value="occupancy">Lowest occupancy</option></select
+			></label
 		>
 	</div>
-
-	<div class="metric-row">
-		<div class="metric emphasis">
-			<span>Properties</span><strong>{properties.length}</strong><small>Managed locations</small>
-		</div>
-		<div class="metric">
-			<span>Rentable spaces</span><strong>{spaces.length}</strong><small
-				>{occupiedCount} occupied · {vacantCount} vacant</small
-			>
-		</div>
-		<div class="metric">
-			<span>Mapped locations</span><strong>{mappedCount}</strong><small
-				>Visible on your portfolio map</small
-			>
+	<div class="results-toolbar">
+		<p aria-live="polite">
+			<strong>{filtered.length}</strong> of {properties.length} properties {#if search || status !== 'all' || availability !== 'all'}<button
+					type="button"
+					onclick={clear}>Clear filters ×</button
+				>{/if}
+		</p>
+		<div class="view-switch" aria-label="Property view">
+			{#each ['cards', 'table', 'map'] as option (option)}<button
+					type="button"
+					aria-pressed={view === option}
+					onclick={() => (view = option as typeof view)}
+					>{option === 'cards' ? '▦ Cards' : option === 'table' ? '☷ Table' : '⌖ Map'}</button
+				>{/each}
 		</div>
 	</div>
-	<nav class="property-tabs" aria-label="Property views"><button class:active={view === 'register'} onclick={() => (view = 'register')}>Property register</button><button class:active={view === 'map'} onclick={() => (view = 'map')}>Portfolio map</button></nav>
-
-	<div class="overview-grid">
-		{#if view === 'register'}<section class="panel property-panel">
-			<div class="panel-heading">
-				<div>
-					<p class="eyebrow">All locations</p>
-					<h3>Property register</h3>
-					<p>Each property keeps its address, rental model, and spaces together.</p>
-				</div>
-				<span class="count"
-					>{properties.length} {properties.length === 1 ? 'property' : 'properties'}</span
-				>
-			</div>
-			{#if properties.length === 0}
-				<div class="empty">
-					<strong>No properties listed yet.</strong>
-					<p>Start with the first location in your portfolio.</p>
-					<a class="secondary" href={resolve(`/workspace/${organization.id}/new-property`)}
-						>Register your first property →</a
-					>
-				</div>
-			{:else}
-				<div class="property-list">
-					{#each properties as property (property.id)}
-						{@const propertySpaces = spacesFor(property.id)}
-						{@const occupied = occupiedFor(property.id)}
-						<article class="property-card">
-							<div class="property-card-heading">
-								<span class="property-icon">⌂</span>
-								<div>
-									<h4>{property.name}</h4>
-									<p>
-										{property.address_line_1 ??
-											property.city ??
-											'Address not captured'}{property.country ? ` · ${property.country}` : ''}
-									</p>
-								</div>
-								<span class:inactive={property.status !== 'active'} class="status"
-									>{property.status}</span
+	{#if !filtered.length}<div class="empty">
+			<span>⌂</span>
+			<h2>{properties.length ? 'No properties match.' : 'Your portfolio starts here.'}</h2>
+			<p>
+				{properties.length
+					? 'Try a different search or clear the filters.'
+					: 'Register a property and its spaces to begin.'}
+			</p>
+			{#if properties.length}<button type="button" onclick={clear}>Clear filters</button>{:else}<a
+					class="primary"
+					href={resolve(`/workspace/${organization.id}/new-property`)}
+					onclick={(event) => {
+						if (onAdd) {
+							event.preventDefault();
+							onAdd();
+						}
+					}}>Add your first property ↗</a
+				>{/if}
+		</div>
+	{:else if view === 'cards'}<div class="property-grid">
+			{#each filtered as property (property.id)}<article class="property-card">
+					<div class="card-art" class:inactive={property.status !== 'active'}>
+						<span class="property-reference">{property.code || 'PROPERTY RECORD'}</span><span
+							class="status">{property.status}</span
+						><span class="art-monogram" aria-hidden="true"
+							>{property.name.slice(0, 2).toUpperCase()}</span
+						><svg viewBox="0 0 240 130" fill="none" aria-hidden="true"
+							><path
+								d="M20 130V66L76 26l55 40v64M76 26v104M131 130V14h73v116M144 31h17v23h-17zM177 31h15v23h-15zM144 71h17v23h-17zM177 71h15v23h-15zM39 89h19v41M94 89h19v23"
+							/></svg
+						><small
+							>{modes[property.rental_mode ?? 'whole_property'] ?? 'Rental model not set'}</small
+						>
+					</div>
+					<div class="card-body">
+						<h2>
+							<a href={resolve(`/workspace/${organization.id}/properties/${property.id}`)}
+								>{property.name} <span>↗</span></a
+							>
+						</h2>
+						<p class="address">
+							{[property.address_line_1, property.city, property.country]
+								.filter(Boolean)
+								.join(' · ') || 'Address not captured'}
+						</p>
+						<div class="card-numbers">
+							<div><strong>{property.total}</strong><small>Rentable spaces</small></div>
+							<div><strong>{property.vacant}</strong><small>Vacant</small></div>
+							<div>
+								<strong>{percent(property) === null ? '—' : `${percent(property)}%`}</strong><small
+									>Occupied</small
 								>
 							</div>
-							<div class="property-meta">
-								<span><b>{propertySpaces.length}</b> spaces</span><span
-									><b>{occupied}</b> occupied</span
-								><span
-									><b
-										>{propertySpaces.length
-											? Math.round((occupied / propertySpaces.length) * 100)
-											: 0}%</b
-									> occupied</span
-								><span class="model">{modeLabels[property.rental_mode ?? 'whole_property']}</span>
-							</div>
-							<div
-								class="occupancy-bar"
-								aria-label={`${occupied} of ${propertySpaces.length} spaces occupied`}
-							>
-								<i
-									style={`width: ${propertySpaces.length ? Math.round((occupied / propertySpaces.length) * 100) : 0}%`}
-								></i>
-							</div>
-							<div class="property-footer">
-								<small
-									>{property.code ?? 'No reference code'} · {property.latitude && property.longitude
-										? 'Mapped location'
-										: 'Location not pinned'}</small
-								><a href={resolve(`/workspace/${organization.id}/properties/${property.id}`)}>View property →</a>
-							</div>
-						</article>
-					{/each}
-				</div>
-			{/if}
-		</section>{/if}
-		{#if view === 'map'}<section class="panel map-panel">
-			<div class="panel-heading">
-				<div>
-					<p class="eyebrow">Portfolio map</p>
-					<h3>Where your properties are</h3>
-					<p>Use the map to understand your footprint at a glance.</p>
-				</div>
-				<span class="count">{mappedCount} pinned</span>
-			</div>
-			<PortfolioMap {properties} />
-			<div class="map-note">
-				<span>⌖</span>
-				<p>
-					Need to add another location? <a
-						href={resolve(`/workspace/${organization.id}/new-property`)}>Register a property</a
-					> and pin it during setup.
+						</div>
+						<div
+							class="occupancy-track"
+							role="img"
+							aria-label={`${property.occupied} of ${property.total} rentable spaces occupied`}
+						>
+							<i style:width={`${percent(property) ?? 0}%`}></i>
+						</div>
+						<div class="card-foot">
+							<span class:needs-care={property.requests > 0}
+								>{property.requests
+									? `${property.requests} open requests`
+									: 'No open maintenance'}</span
+							><span>{property.pinned ? '⌖ Mapped' : 'Pin not set'}</span>
+						</div>
+					</div>
+				</article>{/each}
+		</div>
+	{:else if view === 'table'}<div class="table-shell">
+			<table>
+				<caption>Filtered property register</caption><thead
+					><tr
+						><th>Property</th><th>Model</th><th>Status</th><th>Spaces</th><th>Vacant</th><th
+							>Occupancy</th
+						><th>Maintenance</th><th></th></tr
+					></thead
+				><tbody
+					>{#each filtered as property (property.id)}<tr
+							><td
+								><a href={resolve(`/workspace/${organization.id}/properties/${property.id}`)}
+									>{property.name}</a
+								><small>{property.city || property.address_line_1 || 'Location not set'}</small></td
+							><td>{modes[property.rental_mode ?? 'whole_property'] ?? 'Not set'}</td><td
+								>{property.status}</td
+							><td>{property.total}</td><td>{property.vacant}</td><td
+								>{percent(property) === null ? '—' : `${percent(property)}%`}</td
+							><td>{property.requests} open</td><td
+								><a
+									href={resolve(`/workspace/${organization.id}/properties/${property.id}`)}
+									aria-label={`Open ${property.name}`}>↗</a
+								></td
+							></tr
+						>{/each}</tbody
+				>
+			</table>
+		</div>
+	{:else}<div class="map-layout">
+			<div class="map-panel">
+				<PortfolioMap properties={filtered} />
+				<p class="map-description">
+					Showing {filtered.filter((row) => row.pinned).length} mapped locations matching your filters.
+					{filtered.filter((row) => !row.pinned).length} without a pin.
 				</p>
 			</div>
-		</section>{/if}
-	</div>
+			<aside class="map-register">
+				<p class="eyebrow">LOCATIONS / {pinned} PINNED IN PORTFOLIO</p>
+				{#each filtered as property (property.id)}<a
+						href={resolve(`/workspace/${organization.id}/properties/${property.id}`)}
+						><strong>{property.name}<span>↗</span></strong><small
+							>{property.city || property.address_line_1 || 'Location not set'}</small
+						><span class="pin-label"
+							>{property.pinned ? 'Mapped location' : 'Location needs a pin'}</span
+						></a
+					>{/each}
+			</aside>
+		</div>{/if}
+	<footer class="portfolio-note">
+		Space totals match the dashboard: active terminal spaces in active properties. Subdivided parent
+		units are excluded.
+	</footer>
 </section>
 
 <style>
-	.properties-page {
-		display: grid;
-		gap: 16px;
+	.portfolio-browser {
+		color: #294334;
+		font-family: var(--font-body);
 	}
-	.page-heading {
-		align-items: flex-end;
-		display: flex;
-		gap: 24px;
-		justify-content: space-between;
+	.portfolio-browser * {
+		box-sizing: border-box;
 	}
-	.eyebrow {
-		color: #718f82;
-		font-size: 11px;
-		font-weight: 800;
-		letter-spacing: 0.15em;
-		margin: 0 0 9px;
-		text-transform: uppercase;
-	}
-	h2,
-	h3,
-	h4,
-	p {
+	.portfolio-browser h1,
+	.portfolio-browser h2,
+	.portfolio-browser p {
 		margin-top: 0;
 	}
-	h2 {
-		color: #093f3d;
-		font-size: clamp(40px, 5vw, 62px);
-		letter-spacing: -0.08em;
-		line-height: 0.94;
+	.portfolio-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 25px;
+		margin-bottom: 30px;
+	}
+	.eyebrow {
+		font-size: 8px;
+		letter-spacing: 1.6px;
+		color: #879575;
+		margin-bottom: 14px;
+	}
+	.portfolio-heading h1 {
+		font-size: clamp(26px, 2.5vw, 39px);
+		letter-spacing: -1.4px;
+		font-weight: 500;
+		line-height: 1.2;
 		margin-bottom: 12px;
 	}
-	h2 span {
-		color: var(--musha-lime);
+	.portfolio-heading h1 em {
+		font-family: Georgia, serif;
+		font-weight: 400;
 	}
-	h3 {
-		color: #0b4541;
-		font-size: 25px;
-		letter-spacing: -0.06em;
-		margin-bottom: 8px;
-	}
-	h4 {
-		color: #2d5b4b;
-		font-size: 17px;
-		letter-spacing: -0.03em;
-		margin-bottom: 4px;
-	}
-	.intro-copy,
-	.panel-heading p {
-		color: #718a7e;
-		font-size: 14px;
-		line-height: 1.55;
-		margin-bottom: 0;
-		max-width: 620px;
+	.portfolio-heading > div > p:last-child {
+		font-size: 11px;
+		color: #839172;
+		line-height: 1.8;
+		margin: 0;
 	}
 	.primary {
-		align-items: center;
-		background: var(--musha-deep);
-		border-radius: 7px;
+		background: #294c38;
 		color: #fff;
-		display: inline-flex;
-		font-size: 13px;
-		font-weight: 800;
-		gap: 12px;
-		padding: 13px 16px;
+		padding: 13px 18px;
+		font-size: 11px;
 		text-decoration: none;
+		border-radius: 6px;
 		white-space: nowrap;
 	}
-	.primary span {
-		color: var(--musha-lime);
-		font-size: 17px;
-	}
-	.metric-row {
+	.portfolio-summary {
 		display: grid;
-		gap: 10px;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-	}
-	.metric {
-		background: #fff;
-		border: 1px solid #e1ebe2;
-		border-radius: 10px;
-		padding: 17px;
-	}
-	.metric.emphasis {
-		background: var(--musha-deep);
-		border-color: var(--musha-deep);
-		color: #fff;
-	}
-	.metric span,
-	.metric small {
-		color: #7a9287;
-		display: block;
-		font-size: 11px;
-	}
-	.metric.emphasis span,
-	.metric.emphasis small {
-		color: #b7d1c2;
-	}
-	.metric strong {
-		color: #244a3b;
-		display: block;
-		font-size: 30px;
-		letter-spacing: -0.06em;
-		margin: 9px 0 3px;
-	}
-	.metric.emphasis strong {
-		color: #fff;
-	}
-	.overview-grid {
-		align-items: start;
-		display: grid;
-		gap: 14px;
-		grid-template-columns: 1fr;
-	}
-	.property-tabs{display:flex;gap:8px}.property-tabs button{background:#fff;border:1px solid #dce9e0;border-radius:7px;color:#557568;cursor:pointer;font:inherit;font-size:12px;font-weight:700;padding:10px 13px}.property-tabs button.active{background:#eaf3d7;color:#2f694e}
-	.panel {
-		background: #fff;
-		border: 1px solid #e1ebe2;
+		grid-template-columns: repeat(4, 1fr);
+		border: 1px solid #dde3d3;
+		background: #fffefa;
 		border-radius: 12px;
-		padding: 25px;
+		padding: 23px 10px;
+		margin-bottom: 27px;
 	}
-	.panel-heading {
-		align-items: flex-start;
+	.portfolio-summary > div {
+		padding: 0 22px;
+		border-right: 1px solid #e4e9db;
+	}
+	.portfolio-summary > div:last-child {
+		border: 0;
+	}
+	.portfolio-summary span {
+		display: block;
+		font-size: 10px;
+		color: #7a8b69;
+		margin-bottom: 13px;
+	}
+	.portfolio-summary strong {
+		display: block;
+		font-size: 27px;
+		font-weight: 500;
+		letter-spacing: -1px;
+	}
+	.portfolio-summary small {
+		font-size: 9px;
+		font-weight: 400;
+		letter-spacing: 0;
+		margin-left: 12px;
+		color: #8b987d;
+	}
+	.browser-controls {
 		display: flex;
-		gap: 15px;
-		justify-content: space-between;
-		margin-bottom: 20px;
+		align-items: end;
+		gap: 14px;
+		background: #e9eedf;
+		padding: 18px;
+		border: 1px solid #dfe6d3;
+		border-radius: 10px;
 	}
-	.count,
-	.status {
-		background: #edf4dc;
-		border-radius: 99px;
-		color: #668a6d;
-		font-size: 11px;
-		padding: 7px 10px;
-		white-space: nowrap;
-	}
-	.status {
-		text-transform: capitalize;
-	}
-	.status.inactive {
-		background: #f6e6e0;
-		color: #9a5a4c;
-	}
-	.property-list {
+	.browser-controls label {
 		display: grid;
 		gap: 9px;
-	}
-	.property-card {
-		border: 1px solid #e4eee5;
-		border-radius: 9px;
-		padding: 15px;
-	}
-	.property-card-heading {
-		align-items: center;
-		display: flex;
-		gap: 10px;
-	}
-	.property-card-heading > div {
 		flex: 1;
 		min-width: 0;
 	}
-	.property-card-heading p {
-		color: #8a9e94;
-		font-size: 11px;
-		margin: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+	.browser-controls .search {
+		flex: 2;
 	}
-	.property-icon {
-		align-items: center;
-		background: #eaf3d7;
-		border-radius: 9px;
-		color: #5c8a63;
-		display: inline-flex;
-		flex: 0 0 34px;
-		height: 34px;
-		justify-content: center;
+	.browser-controls label > span {
+		font-size: 8px;
+		letter-spacing: 0.5px;
+		color: #7d8e6c;
 	}
-	.property-meta {
-		align-items: center;
-		color: #7b9287;
+	.browser-controls input,
+	.browser-controls select {
+		width: 100%;
+		min-width: 0;
+		font: inherit;
+		font-size: 10px;
+		padding: 12px;
+		border: 1px solid #d9e2cc;
+		border-radius: 5px;
+		background: #fffefa;
+		color: #567046;
+	}
+	.results-toolbar {
 		display: flex;
-		flex-wrap: wrap;
-		font-size: 11px;
+		align-items: center;
+		justify-content: space-between;
+		gap: 20px;
+		margin: 22px 0;
+	}
+	.results-toolbar p {
+		font-size: 10px;
+		color: #8a967c;
+		margin: 0;
+	}
+	.results-toolbar strong {
+		color: #405d35;
+		font-weight: 500;
+	}
+	.results-toolbar p button {
+		font: inherit;
+		font-size: 9px;
+		color: #6a8156;
+		margin-left: 15px;
+		background: none;
+		border: 0;
+		cursor: pointer;
+	}
+	.view-switch {
+		display: flex;
+		background: #e9eedf;
+		border: 1px solid #dce4cf;
+		border-radius: 7px;
+		padding: 3px;
+		gap: 3px;
+	}
+	.view-switch button {
+		border: 0;
+		border-radius: 5px;
+		background: none;
+		color: #80946a;
+		padding: 9px 14px;
+		font: inherit;
+		font-size: 10px;
+		cursor: pointer;
+	}
+	.view-switch button[aria-pressed='true'] {
+		background: #fffefa;
+		color: #3e5d30;
+		box-shadow: 0 2px 6px #304b2010;
+	}
+	.property-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 18px;
+	}
+	.property-card {
+		background: #fffefa;
+		border: 1px solid #dce4d1;
+		border-radius: 12px;
+		overflow: hidden;
+		transition:
+			transform 0.2s,
+			box-shadow 0.2s;
+	}
+	.property-card:hover {
+		transform: translateY(-3px);
+		box-shadow: 0 12px 25px #29443409;
+	}
+	.card-art {
+		height: 160px;
+		background: #e4ebd9;
+		position: relative;
+		overflow: hidden;
+		padding: 18px;
+		color: #6c8354;
+	}
+	.card-art.inactive {
+		background: #e9e9df;
+		color: #929780;
+	}
+	.property-reference {
+		font-size: 8px;
+		letter-spacing: 1.5px;
+		position: relative;
+		z-index: 1;
+	}
+	.status {
+		position: absolute;
+		top: 14px;
+		right: 14px;
+		padding: 6px 9px;
+		font-size: 8px;
+		text-transform: capitalize;
+		border-radius: 4px;
+		background: #ffffffa0;
+		color: #5d7749;
+	}
+	.card-art svg {
+		position: absolute;
+		right: -5px;
+		bottom: -2px;
+		height: 125px;
+		width: 230px;
+		stroke: currentColor;
+		stroke-width: 1;
+		opacity: 0.35;
+	}
+	.art-monogram {
+		font-family: Georgia, serif;
+		font-size: 62px;
+		letter-spacing: -5px;
+		position: absolute;
+		top: 49px;
+		left: 20px;
+		color: #809966;
+		opacity: 0.5;
+	}
+	.card-art > small {
+		position: absolute;
+		bottom: 15px;
+		left: 18px;
+		font-size: 8px;
+		letter-spacing: 0.8px;
+		z-index: 1;
+	}
+	.card-body {
+		padding: 23px 20px 17px;
+	}
+	.card-body h2 {
+		font-size: 17px;
+		font-weight: 500;
+		letter-spacing: -0.5px;
+		line-height: 1.4;
+		margin-bottom: 7px;
+	}
+	.card-body h2 a {
+		color: #304e2e;
+		text-decoration: none;
+		display: flex;
+		justify-content: space-between;
 		gap: 15px;
-		margin: 15px 0 9px 44px;
+		overflow-wrap: anywhere;
 	}
-	.property-meta b {
-		color: #3f6d56;
-		font-size: 12px;
+	.card-body h2 span {
+		font-size: 16px;
+		color: #8b9e77;
+		flex: none;
 	}
-	.property-meta .model {
-		background: #f0f5e9;
-		border-radius: 99px;
-		color: #688c6a;
-		padding: 5px 8px;
+	.address {
+		font-size: 9px;
+		line-height: 1.8;
+		color: #97a18b;
+		min-height: 32px;
+		margin-bottom: 20px;
 	}
-	.occupancy-bar {
-		background: #edf3eb;
-		border-radius: 99px;
-		height: 5px;
-		margin-left: 44px;
+	.card-numbers {
+		display: grid;
+		grid-template-columns: 1fr 1fr 1fr;
+		gap: 10px;
+	}
+	.card-numbers > div {
+		border-right: 1px solid #e8ecdf;
+	}
+	.card-numbers > div:last-child {
+		border: 0;
+	}
+	.card-numbers strong {
+		display: block;
+		font-size: 21px;
+		font-weight: 500;
+		letter-spacing: -0.6px;
+	}
+	.card-numbers small {
+		display: block;
+		font-size: 8px;
+		color: #91a07f;
+		margin-top: 6px;
+	}
+	.occupancy-track {
+		height: 4px;
+		background: #ebefdf;
+		border-radius: 5px;
+		margin: 20px 0 17px;
 		overflow: hidden;
 	}
-	.occupancy-bar i {
-		background: #87ad62;
-		border-radius: inherit;
+	.occupancy-track i {
 		display: block;
 		height: 100%;
+		background: #88a76b;
+		border-radius: 5px;
 	}
-	.property-footer {
-		align-items: center;
+	.card-foot {
 		display: flex;
-		gap: 12px;
 		justify-content: space-between;
-		margin: 12px 0 0 44px;
+		gap: 12px;
+		border-top: 1px solid #e7ecdc;
+		padding-top: 14px;
+		font-size: 8px;
+		color: #94a383;
 	}
-	.property-footer small {
-		color: #91a198;
-		font-size: 10px;
+	.needs-care {
+		color: #a47744;
 	}
-	.property-footer a,
-	.map-note a {
-		color: #4c8061;
+	.table-shell {
+		border: 1px solid #dfe5d5;
+		border-radius: 10px;
+		overflow: auto;
+		background: #fffefa;
+	}
+	table {
+		width: 100%;
+		border-collapse: collapse;
+		white-space: nowrap;
+	}
+	caption {
+		text-align: left;
+		padding: 20px;
 		font-size: 11px;
-		font-weight: 800;
+		color: #7d8f69;
+	}
+	th {
+		text-align: left;
+		background: #edf1e5;
+		color: #7d9069;
+		font-size: 9px;
+		font-weight: 500;
+		padding: 15px;
+	}
+	td {
+		padding: 19px 15px;
+		border-top: 1px solid #e7ecdd;
+		font-size: 10px;
+		color: #728461;
+		text-transform: capitalize;
+	}
+	td:first-child a {
+		font-size: 12px;
+		color: #416035;
 		text-decoration: none;
+	}
+	td small {
+		display: block;
+		font-size: 9px;
+		color: #99a68a;
+		margin-top: 8px;
+	}
+	td a {
+		color: #5c7748;
+	}
+	.map-layout {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 260px;
+		gap: 18px;
+	}
+	.map-panel {
+		min-width: 0;
+	}
+	.map-description {
+		font-size: 9px;
+		line-height: 1.8;
+		color: #8a9b77;
+		margin: 16px 0;
+	}
+	.map-register {
+		border: 1px solid #dce5d0;
+		background: #fffefa;
+		padding: 20px;
+		border-radius: 10px;
+		max-height: 520px;
+		overflow: auto;
+	}
+	.map-register a {
+		display: block;
+		border-top: 1px solid #e9eddf;
+		padding: 19px 0;
+		text-decoration: none;
+		color: inherit;
+	}
+	.map-register strong {
+		display: flex;
+		justify-content: space-between;
+		gap: 12px;
+		font-size: 11px;
+		font-weight: 500;
+	}
+	.map-register small {
+		display: block;
+		color: #99a58a;
+		font-size: 9px;
+		margin-top: 8px;
+	}
+	.pin-label {
+		display: block;
+		margin-top: 13px;
+		color: #82996b;
+		font-size: 8px;
+	}
+	.portfolio-note {
+		font-size: 8px;
+		line-height: 1.9;
+		color: #9ba58d;
+		margin-top: 24px;
 	}
 	.empty {
-		align-items: center;
-		border: 1px dashed #d9e7dc;
-		border-radius: 8px;
-		display: grid;
-		gap: 7px;
-		justify-items: center;
-		min-height: 190px;
+		padding: 65px 25px;
 		text-align: center;
+		border: 1px dashed #cddabd;
+		border-radius: 12px;
+		display: grid;
+		justify-items: center;
+		gap: 15px;
 	}
-	.empty strong {
-		color: #486b5b;
-		font-size: 13px;
+	.empty > span {
+		font-size: 32px;
+		color: #8ca776;
 	}
-	.empty p {
-		color: #8a9f94;
-		font-size: 12px;
-		margin-bottom: 5px;
-	}
-	.secondary {
-		background: #edf4dc;
-		border-radius: 7px;
-		color: #3b7255;
-		font-size: 12px;
-		font-weight: 800;
-		padding: 10px 12px;
-		text-decoration: none;
-	}
-	.map-panel :global(.portfolio-map) {
-		height: 380px;
-	}
-	.map-note {
-		align-items: center;
-		background: #f4f8ed;
-		border-radius: 8px;
-		display: flex;
-		gap: 9px;
-		margin-top: 12px;
-		padding: 10px 12px;
-	}
-	.map-note span {
-		color: #6b996d;
-		font-size: 18px;
-	}
-	.map-note p {
-		color: #718b7d;
-		font-size: 11px;
-		line-height: 1.4;
+	.empty h2 {
+		font-size: 22px;
+		font-weight: 500;
 		margin: 0;
 	}
+	.empty p {
+		font-size: 12px;
+		color: #8e9f7b;
+		margin: 0;
+	}
+	.empty button {
+		background: #e7eedc;
+		border: 0;
+		padding: 12px 18px;
+		color: #637f49;
+		cursor: pointer;
+		border-radius: 5px;
+	}
+	a:focus-visible,
+	button:focus-visible,
+	input:focus-visible,
+	select:focus-visible {
+		outline: 2px solid #8caa70;
+		outline-offset: 4px;
+	}
+	@media (max-width: 1250px) {
+		.property-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.portfolio-summary small {
+			display: block;
+			margin: 7px 0 0;
+		}
+		.map-layout {
+			grid-template-columns: minmax(0, 1fr) 220px;
+		}
+	}
 	@media (max-width: 900px) {
-		.overview-grid {
-			grid-template-columns: 1fr;
-		}
-	}
-	@media (max-width: 650px) {
-		.page-heading {
-			align-items: flex-start;
-			flex-direction: column;
-		}
-		.metric-row {
-			grid-template-columns: 1fr;
-		}
-		.panel {
-			padding: 18px;
-		}
-		.map-panel :global(.portfolio-map) {
-			height: 280px;
-		}
-	}
-	@media (max-width: 480px) {
-		.property-card-heading {
-			align-items: flex-start;
+		.browser-controls {
 			flex-wrap: wrap;
 		}
-		.property-card-heading .status {
-			margin-left: 44px;
+		.browser-controls .search {
+			flex-basis: 100%;
 		}
-		.property-meta,
-		.occupancy-bar,
-		.property-footer {
-			margin-left: 0;
+		.property-grid {
+			gap: 12px;
 		}
-		.property-footer {
-			align-items: flex-start;
+		.map-layout {
+			grid-template-columns: 1fr;
+		}
+		.map-register {
+			max-height: 300px;
+		}
+		.portfolio-heading {
+			align-items: start;
 			flex-direction: column;
+		}
+	}
+	@media (max-width: 550px) {
+		.portfolio-heading h1 {
+			font-size: 30px;
+		}
+		.portfolio-summary {
+			grid-template-columns: 1fr 1fr;
+			gap: 22px 0;
+			padding: 22px 4px;
+		}
+		.portfolio-summary > div:nth-child(2) {
+			border: 0;
+		}
+		.portfolio-summary > div {
+			padding: 0 16px;
+		}
+		.portfolio-summary strong {
+			font-size: 25px;
+		}
+		.property-grid {
+			grid-template-columns: 1fr;
+		}
+		.browser-controls {
+			padding: 15px;
+			gap: 15px 9px;
+		}
+		.browser-controls label {
+			flex-basis: 40%;
+		}
+		.results-toolbar {
+			flex-wrap: wrap;
+			gap: 16px;
+		}
+		.view-switch {
+			width: 100%;
+		}
+		.view-switch button {
+			flex: 1;
+			padding: 11px;
+		}
+		.card-art {
+			height: 150px;
+		}
+		.card-body h2 {
+			font-size: 19px;
+		}
+		.card-numbers strong {
+			font-size: 24px;
+		}
+		.address {
+			min-height: 0;
+		}
+		.portfolio-note {
+			font-size: 9px;
+		}
+		.card-foot {
+			font-size: 9px;
+		}
+		.card-numbers small {
+			font-size: 9px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.property-card {
+			transition: none;
 		}
 	}
 </style>

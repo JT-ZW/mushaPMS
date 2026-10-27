@@ -1,5 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import LeaseLifecycle from './LeaseLifecycle.svelte';
+	import { submissionKey } from '$lib/forms/submission-key';
+	import { workspaceSubmit } from '$lib/forms/workspace-submit';
+	import { enhance } from '$app/forms';
+	import { goto } from '$app/navigation';
+	import { organizationDate } from '$lib/dashboard/snapshot';
+	import { isCurrentLease, expiresWithin } from '$lib/dashboard/leases';
+	import { rentableSpaces } from '$lib/dashboard/portfolio';
 
 	type Person = {
 		id: string;
@@ -16,8 +24,15 @@
 		country: string | null;
 		notes: string | null;
 	};
-	type Property = { id: string; name: string };
-	type Space = { id: string; property_id: string; name: string; kind: string; status: string };
+	type Property = { id: string; name: string; status: string };
+	type Space = {
+		id: string;
+		property_id: string;
+		parent_space_id?: string | null;
+		name: string;
+		kind: string;
+		status: string;
+	};
 	type Tenancy = {
 		id: string;
 		space_id: string;
@@ -27,6 +42,7 @@
 		end_date: string | null;
 		rent_amount: number | string;
 		deposit_amount: number | string;
+		expected_move_out_on?: string | null;
 		billing_frequency: string;
 		rent_due_day?: number | null;
 		notice_period_days?: number | null;
@@ -42,6 +58,7 @@
 		amount: number | string;
 		due_on: string;
 		status?: string;
+		charge_type?: string;
 	};
 	type Payment = {
 		id: string;
@@ -75,7 +92,7 @@
 		created_at: string;
 	};
 	type WorkspaceData = {
-		organization: { id: string; name: string; currency_code: string };
+		organization: { id: string; name: string; currency_code: string; timezone?: string };
 		properties: Property[];
 		spaces: Space[];
 		people: Person[];
@@ -96,8 +113,77 @@
 	}>();
 	const data = $derived(props.data as WorkspaceData);
 	const active = $derived(props.active);
+	const depositHeld = (id: string) =>
+		data.paymentAllocations
+			.filter((a) =>
+				data.charges.some(
+					(c) =>
+						c.id === a.charge_id &&
+						c.tenancy_id === id &&
+						c.charge_type === 'deposit' &&
+						!['draft', 'void'].includes(c.status ?? 'issued')
+				)
+			)
+			.reduce((n, a) => n + Number(a.amount), 0);
+	const leaseBalance = (id: string) =>
+		data.charges
+			.filter((c) => c.tenancy_id === id && !['draft', 'void'].includes(c.status ?? 'issued'))
+			.reduce(
+				(n, c) =>
+					n +
+					Math.max(
+						0,
+						Number(c.amount) -
+							data.paymentAllocations
+								.filter((a) => a.charge_id === c.id)
+								.reduce((v, a) => v + Number(a.amount), 0)
+					),
+				0
+			);
 	const profileId = $derived(props.profileId ?? '');
-	const today = new Date().toISOString().slice(0, 10);
+	const today = $derived(
+		organizationDate(new Date(), data.organization.timezone || 'Africa/Harare')
+	);
+	let query = $state('');
+	let propertyFilter = $state('all');
+	let leaseFilter = $state('all');
+	let onboardingStep = $state(1);
+	let onboardingForm = $state<HTMLFormElement>(null!);
+	let onboardingSummary = $state<[string, string][]>([]);
+	let saving = $state(false);
+	function nextOnboarding() {
+		for (const control of Array.from(
+			onboardingForm.querySelectorAll<HTMLInputElement | HTMLSelectElement>(
+				'fieldset:not([hidden]) input,fieldset:not([hidden]) select'
+			)
+		)) {
+			if (!control.reportValidity()) return;
+		}
+		if (onboardingStep === 2) {
+			const values = new FormData(onboardingForm);
+			onboardingSummary = [
+				['Tenant', `${values.get('first_name')} ${values.get('last_name')}`],
+				[
+					'Space',
+					`${propertyName(String(values.get('space_id')))} ? ${spaceName(String(values.get('space_id')))}`
+				],
+				['Lease dates', `${values.get('start_date')} ? ${values.get('end_date') || 'Ongoing'}`],
+				[
+					'Rent',
+					`${money(String(values.get('rent_amount')))} / ${values.get('billing_frequency')}`
+				],
+				['Deposit', money(String(values.get('deposit_amount') || 0))],
+				['Deposit received now', money(String(values.get('deposit_received') || 0))],
+				[
+					'Check-in',
+					values.has('checked_in')
+						? 'Activate lease and rent schedule'
+						: 'Save as draft; no check-in'
+				]
+			];
+		}
+		onboardingStep = Math.min(3, onboardingStep + 1);
+	}
 	let selectedPersonId = $state('');
 	let profileOpen = $state(false);
 
@@ -105,7 +191,14 @@
 		data.people.filter((person: Person) => person.person_type === 'tenant')
 	);
 	const availableSpaces = $derived(
-		data.spaces.filter((space: Space) => space.status === 'vacant')
+		rentableSpaces<Space>(data.properties, data.spaces).filter(
+			(space: Space) =>
+				space.status === 'vacant' &&
+				!data.tenancies.some(
+					(lease: Tenancy) =>
+						lease.space_id === space.id && ['active', 'ending_soon', 'draft'].includes(lease.status)
+				)
+		)
 	);
 	$effect(() => {
 		if (profileId) {
@@ -153,7 +246,7 @@
 		)
 	);
 	const activeTenancies = $derived(
-		data.tenancies.filter((tenancy: Tenancy) => tenancy.status === 'active')
+		data.tenancies.filter((tenancy: Tenancy) => isCurrentLease(tenancy, today))
 	);
 	const endedTenancies = $derived(
 		data.tenancies.filter((tenancy: Tenancy) =>
@@ -161,11 +254,9 @@
 		)
 	);
 	const expiringTenancies = $derived(
-		activeTenancies.filter(
-			(tenancy: Tenancy) =>
-				tenancy.end_date &&
-				tenancy.end_date <= new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10)
-		)
+		activeTenancies
+			.filter((tenancy: Tenancy) => expiresWithin(tenancy, today))
+			.sort((a: Tenancy, b: Tenancy) => a.end_date!.localeCompare(b.end_date!))
 	);
 	const spaceName = (id: string) =>
 		data.spaces.find((space: Space) => space.id === id)?.name ?? 'Space not found';
@@ -191,13 +282,29 @@
 	const amount = (value: number | string | null | undefined) => Number(value ?? 0);
 	const allocationsForCharge = (chargeId: string) =>
 		data.paymentAllocations
-			.filter((item: Allocation) => item.charge_id === chargeId)
+			.filter(
+				(item: Allocation) =>
+					item.charge_id === chargeId &&
+					data.payments.some(
+						(payment: Payment) => payment.id === item.payment_id && payment.payment_date <= today
+					)
+			)
 			.reduce((sum: number, item: Allocation) => sum + amount(item.amount), 0);
 	const outstanding = (charge: Charge) =>
-		Math.max(0, amount(charge.amount) - allocationsForCharge(charge.id));
+		['draft', 'void'].includes(charge.status ?? 'issued')
+			? 0
+			: Math.max(
+					0,
+					Math.round((amount(charge.amount) - allocationsForCharge(charge.id)) * 100) / 100
+				);
 	const tenancyBalance = (tenancyId: string) =>
 		data.charges
-			.filter((charge: Charge) => charge.tenancy_id === tenancyId && charge.status !== 'void')
+			.filter(
+				(charge: Charge) =>
+					charge.tenancy_id === tenancyId &&
+					!['draft', 'void'].includes(charge.status ?? 'issued') &&
+					charge.due_on <= today
+			)
 			.reduce((sum: number, charge: Charge) => sum + outstanding(charge), 0);
 	const performance = (personId: string) => {
 		const tenancyIds = new Set(
@@ -239,7 +346,7 @@
 	const tabs = [
 		['people', 'Overview'],
 		['tenants', 'Tenant profiles'],
-		['new-tenant', 'Add tenant'],
+
 		['leases', 'Leases & occupancy'],
 		['documents', 'Documents'],
 		['move-outs', 'Move-outs & history']
@@ -258,7 +365,7 @@
 			)
 		);
 	const currentTenancyFor = (personId: string) =>
-		tenantTenanciesFor(personId).find((tenancy: Tenancy) => tenancy.status === 'active') ??
+		tenantTenanciesFor(personId).find((tenancy: Tenancy) => isCurrentLease(tenancy, today)) ??
 		tenantTenanciesFor(personId)[0] ??
 		null;
 	const spaceKindLabel = (kind?: string | null) =>
@@ -273,26 +380,167 @@
 						: 'Not assigned';
 	const tenantProfileHref = (personId: string) =>
 		`${href('tenants')}/${encodeURIComponent(personId)}`;
+
+	const overdueFor = (id: string) =>
+		data.charges
+			.filter((charge: Charge) => charge.tenancy_id === id && charge.due_on < today)
+			.reduce((total: number, charge: Charge) => total + outstanding(charge), 0);
+	function matchesLease(lease: Tenancy) {
+		const space = data.spaces.find((row: Space) => row.id === lease.space_id);
+		return (
+			(propertyFilter === 'all' || space?.property_id === propertyFilter) &&
+			[
+				personName(lease.id),
+				propertyName(lease.space_id),
+				spaceName(lease.space_id),
+				lease.lease_reference ?? ''
+			]
+				.join(' ')
+				.toLowerCase()
+				.includes(query.toLowerCase()) &&
+			(leaseFilter === 'all' ||
+				(leaseFilter === 'current'
+					? isCurrentLease(lease, today)
+					: leaseFilter === 'expiring'
+						? expiresWithin(lease, today)
+						: leaseFilter === 'arrears'
+							? overdueFor(lease.id) > 0
+							: leaseFilter === 'ended'
+								? ['completed', 'terminated', 'expired'].includes(lease.status)
+								: lease.status === leaseFilter))
+		);
+	}
+	const filteredLeases = $derived(data.tenancies.filter(matchesLease));
+	const filteredTenants = $derived(
+		tenantPeople.filter((person: Person) => {
+			const leases = tenantTenanciesFor(person.id);
+			return (
+				[
+					person.first_name,
+					person.last_name,
+					person.email ?? '',
+					person.phone ?? '',
+					...leases.map(
+						(lease: Tenancy) =>
+							`${propertyName(lease.space_id)} ${spaceName(lease.space_id)} ${lease.lease_reference ?? ''}`
+					)
+				]
+					.join(' ')
+					.toLowerCase()
+					.includes(query.toLowerCase()) &&
+				(propertyFilter === 'all' ||
+					leases.some((lease: Tenancy) =>
+						data.spaces.some(
+							(space: Space) => space.id === lease.space_id && space.property_id === propertyFilter
+						)
+					)) &&
+				(leaseFilter === 'all' ||
+					leases.some((lease: Tenancy) =>
+						leaseFilter === 'current'
+							? isCurrentLease(lease, today)
+							: leaseFilter === 'expiring'
+								? expiresWithin(lease, today)
+								: leaseFilter === 'arrears'
+									? overdueFor(lease.id) > 0
+									: leaseFilter === 'ended'
+										? ['completed', 'terminated', 'expired'].includes(lease.status)
+										: lease.status === leaseFilter
+					))
+			);
+		})
+	);
+	const filteredDocuments = $derived(
+		data.documents.filter((document: Document) => {
+			const person = data.people.find((row: Person) => row.id === document.person_id);
+			const leases = document.tenancy_id
+				? data.tenancies.filter((row: Tenancy) => row.id === document.tenancy_id)
+				: tenantTenanciesFor(document.person_id ?? '');
+			return (
+				[
+					document.file_name,
+					document.document_type,
+					person?.first_name ?? '',
+					person?.last_name ?? ''
+				]
+					.join(' ')
+					.toLowerCase()
+					.includes(query.toLowerCase()) &&
+				(propertyFilter === 'all' ||
+					leases.some((lease: Tenancy) =>
+						data.spaces.some(
+							(space: Space) => space.id === lease.space_id && space.property_id === propertyFilter
+						)
+					))
+			);
+		})
+	);
+	const tenantForLease = (id: string) =>
+		data.parties.find((row: Party) => row.tenancy_id === id && row.role === 'primary')?.person_id;
+	function clearFilters() {
+		query = '';
+		propertyFilter = 'all';
+		leaseFilter = 'all';
+	}
 </script>
+
+<!-- Workspace links use the resolved href helper. -->
+<!-- eslint-disable svelte/no-navigation-without-resolve -->
 
 <section class="people-workspace" aria-labelledby="people-title">
 	<div class="page-heading">
 		<div>
 			<p class="eyebrow">People & leases</p>
-			<h1 id="people-title">Know who is in each space<span>.</span></h1>
+			<h1 id="people-title">People. Places. <em>Lasting relationships.</em></h1>
 			<p class="intro-copy">
-				Keep the person, lease, payment record, documents, and move-out history together.
+				One connected view of your tenants, lease commitments and the next action.
 			</p>
 		</div>
-		<a class="primary" href={href('new-tenant')}>Add tenant <span>→</span></a>
+		<a class="primary" href={active === 'new-tenant' ? href('tenants') : href('new-tenant')}
+			>{active === 'new-tenant' ? 'Back to tenants' : '+ Add tenant'} <span>→</span></a
+		>
 	</div>
 
 	<nav class="section-tabs" aria-label="People and leases sections">
 		{#each tabs as [key, labelText] (key)}
-			<a class:active={active === key} href={href(key)}>{labelText}</a>
+			<a
+				class:active={active === key}
+				aria-current={active === key ? 'page' : undefined}
+				href={href(key)}>{labelText}</a
+			>
 		{/each}
 	</nav>
 
+	{#if active !== 'new-tenant' && !profileId}<div class="people-filters">
+			<label class="people-search"
+				><span>Search records</span><input
+					type="search"
+					bind:value={query}
+					placeholder={active === 'documents'
+						? 'File name or tenant?'
+						: 'Tenant, email, property or reference?'}
+				/></label
+			><label
+				><span>Property</span><select bind:value={propertyFilter}
+					><option value="all">All properties</option
+					>{#each data.properties as property (property.id)}<option value={property.id}
+							>{property.name}</option
+						>{/each}</select
+				></label
+			>{#if active !== 'documents'}<label
+					><span>Lease focus</span><select bind:value={leaseFilter}
+						><option value="all">All records</option><option value="current">Current leases</option
+						><option value="draft">Drafts / check-in pending</option><option value="expiring"
+							>Expiring within 90 days</option
+						><option value="arrears">Overdue balances</option><option value="ended"
+							>Ended leases</option
+						></select
+					></label
+				>{/if}<button type="button" onclick={clearFilters}>Reset filters</button>
+		</div>{/if}
+
+	{#if active !== 'new-tenant' && !profileId}<p class="record-scope-note">
+			Summary metrics cover the workspace. Filters apply to the records below.
+		</p>{/if}
 	{#if active === 'people'}
 		<div class="metric-row">
 			<div class="metric emphasis">
@@ -306,7 +554,7 @@
 								.map((party: Party) => party.person_id)
 						)
 					).size}</strong
-				><small>Currently checked in</small>
+				><small>Primary tenants on current leases</small>
 			</div>
 			<div class="metric">
 				<span>Active leases</span><strong>{activeTenancies.length}</strong><small
@@ -319,10 +567,9 @@
 				>
 			</div>
 			<div class="metric">
-				<span>Balances to follow up</span><strong
-					>{data.tenancies.filter((tenancy: Tenancy) => tenancyBalance(tenancy.id) > 0)
-						.length}</strong
-				><small>Outstanding accounts</small>
+				<span>Overdue accounts</span><strong
+					>{data.tenancies.filter((tenancy: Tenancy) => overdueFor(tenancy.id) > 0).length}</strong
+				><small>Accounts with unpaid overdue charges</small>
 			</div>
 		</div>
 		<div class="overview-grid">
@@ -330,10 +577,8 @@
 				<div class="panel-heading">
 					<div>
 						<p class="eyebrow">Start here</p>
-						<h2>Keep the register current</h2>
-						<p>
-							Complete the key handoffs once, then let Finance and Maintenance use the same records.
-						</p>
+						<h2>Move the right work forward</h2>
+						<p>Onboard accurately, review upcoming expiries and keep each record connected.</p>
 					</div>
 				</div>
 				<div class="quick-actions">
@@ -359,7 +604,7 @@
 					</div>
 				</div>
 				<div class="signal-list">
-					{#each expiringTenancies.slice(0, 4) as tenancy (tenancy.id)}<div>
+					{#each expiringTenancies.filter(matchesLease).slice(0, 4) as tenancy (tenancy.id)}<div>
 							<span class="signal-dot">!</span><span
 								><strong>{personName(tenancy.id)}</strong><small
 									>{spaceName(tenancy.space_id)} · expires {tenancy.end_date}</small
@@ -368,6 +613,15 @@
 						</div>{/each}{#if !expiringTenancies.length}<p class="muted">
 							No leases expire within the next 90 days.
 						</p>{/if}
+					{#each filteredLeases
+						.filter((lease: Tenancy) => overdueFor(lease.id) > 0)
+						.slice(0, 3) as lease (lease.id)}<div>
+							<span class="signal-dot">$</span><span
+								><strong>{personName(lease.id)}</strong><small
+									>{propertyName(lease.space_id)} ? Unpaid overdue charges</small
+								></span
+							><a class="secondary-link" href={href('finance')}>{money(overdueFor(lease.id))} ?</a>
+						</div>{/each}
 				</div>
 			</section>
 		</div>
@@ -379,22 +633,34 @@
 				</div>
 				<a class="secondary-link" href={href('leases')}>View all →</a>
 			</div>
-			{#if activeTenancies.length === 0}<div class="empty">
-					<strong>No active leases yet.</strong>
+			{#if filteredLeases.filter((lease: Tenancy) => isCurrentLease(lease, today)).length === 0}<div
+					class="empty"
+				>
+					<strong>No current leases in this selection.</strong>
 					<p>Start with Add tenant to place the first person into a rentable space.</p>
 				</div>{:else}<div class="table-list">
-					{#each activeTenancies.slice(0, 8) as tenancy (tenancy.id)}<div class="table-row">
+					{#each filteredLeases
+						.filter((lease: Tenancy) => isCurrentLease(lease, today))
+						.slice(0, 8) as tenancy (tenancy.id)}<div class="table-row">
 							<span class="avatar">{personName(tenancy.id).slice(0, 1)}</span><span
 								><strong>{personName(tenancy.id)}</strong><small
 									>{propertyName(tenancy.space_id)} · {spaceName(tenancy.space_id)}</small
 								></span
 							><span><small>Rent</small><strong>{money(tenancy.rent_amount)}</strong></span><span
 								><small>Due</small><strong>{tenancy.rent_due_day ?? 'Schedule'}</strong></span
-							><span class="badge active">Active</span>
+							>{#if tenantForLease(tenancy.id)}<a
+									class="view-button"
+									href={tenantProfileHref(tenantForLease(tenancy.id)!)}>View tenant</a
+								>{/if}
 						</div>{/each}
 				</div>{/if}
 		</section>
 	{:else if active === 'new-tenant'}
+		<nav class="onboarding-steps" aria-label="Tenant onboarding progress">
+			{#each ['Person', 'Lease & check-in', 'Review'] as title, i (title)}<span
+					class:current={onboardingStep === i + 1}>0{i + 1} / {title}</span
+				>{/each}
+		</nav>
 		<section class="panel form-panel onboarding-panel">
 			<div class="panel-heading">
 				<div>
@@ -407,13 +673,48 @@
 				</div>
 			</div>
 			{#if availableSpaces.length === 0}<div class="empty">
-					<strong>{data.spaces.length ? 'No vacant rentable spaces available.' : 'Add a rentable space first.'}</strong>
-					<p>{data.spaces.length ? 'All current spaces are occupied or unavailable. Free a space before starting a new lease.' : 'Tenants need a property room, unit, bed, office, shop, or listing.'}</p>
+					<strong
+						>{data.spaces.length
+							? 'No vacant rentable spaces available.'
+							: 'Add a rentable space first.'}</strong
+					>
+					<p>
+						{data.spaces.length
+							? 'All current spaces are occupied or unavailable. Free a space before starting a new lease.'
+							: 'Tenants need a property room, unit, bed, office, shop, or listing.'}
+					</p>
 					<a class="secondary" href={resolve(`/workspace/${data.organization.id}/new-property`)}
 						>Add a property →</a
 					>
-				</div>{:else}<form method="POST" action="?/createTenant" class="form-stack">
-					<div class="form-section">
+				</div>{:else}<form
+					method="POST"
+					action="?/createTenant"
+					use:submissionKey
+					class="form-stack"
+					bind:this={onboardingForm}
+					novalidate
+					use:enhance={({ cancel }) => {
+						if (onboardingStep < 3) {
+							cancel();
+							nextOnboarding();
+							return;
+						}
+						saving = true;
+						return async ({ result, update }) => {
+							try {
+								await update({ reset: false });
+								if (result.type === 'success' && result.data?.success) {
+									await goto(href('tenants'));
+								} else {
+									onboardingStep = 3;
+								}
+							} finally {
+								saving = false;
+							}
+						};
+					}}
+				>
+					<fieldset class="form-section" hidden={onboardingStep !== 1}>
 						<p class="eyebrow">01 · Person</p>
 						<div class="form-grid two">
 							<label>First name<input name="first_name" required /></label><label
@@ -430,8 +731,8 @@
 								rows="2"
 								placeholder="Employment, emergency context, or useful notes"></textarea></label
 						>
-					</div>
-					<div class="form-section">
+					</fieldset>
+					<fieldset class="form-section" hidden={onboardingStep !== 2}>
 						<p class="eyebrow">02 · Accommodation and lease</p>
 						<div class="form-grid two">
 							<label
@@ -465,6 +766,30 @@
 									step="0.01"
 								/></label
 							><label
+								>Deposit received now<input
+									name="deposit_received"
+									type="number"
+									min="0"
+									step="0.01"
+									value="0"
+								/></label
+							>
+							<label
+								>Deposit payment method<select name="deposit_method"
+									><option value="bank_transfer">Bank transfer</option><option value="cash"
+										>Cash</option
+									><option value="mobile_money">Mobile money</option><option value="manual"
+										>Manual</option
+									></select
+								></label
+							>
+							<label
+								>Deposit reference<input
+									name="deposit_reference"
+									placeholder="Payment reference (if received)"
+								/></label
+							>
+							<label
 								>Billing frequency<select name="billing_frequency"
 									><option value="monthly">Monthly</option><option value="weekly">Weekly</option
 									><option value="quarterly">Quarterly</option><option value="annual">Annual</option
@@ -493,8 +818,8 @@
 								rows="2"
 								placeholder="Special terms, utilities, renewal notes"></textarea></label
 						>
-					</div>
-					<div class="checkin-card">
+					</fieldset>
+					<div class="checkin-card" hidden={onboardingStep !== 2}>
 						<label class="checkbox-line"
 							><input name="checked_in" type="checkbox" /><span
 								><strong>Tenant has checked in</strong><small
@@ -504,7 +829,38 @@
 							></label
 						>
 					</div>
-					<button class="primary" type="submit">Save tenant and lease <span>→</span></button>
+					{#if onboardingStep === 3}<section class="onboarding-review">
+							<p class="eyebrow">03 / REVIEW & CONFIRM</p>
+							<h3>Check the handoff before saving.</h3>
+							<dl>
+								{#each onboardingSummary as [key, value] (key)}<div>
+										<dt>{key}</dt>
+										<dd>{value}</dd>
+									</div>{/each}
+							</dl>
+							<p>
+								Drafts do not mark a space occupied. Check-in activates the tenancy and its
+								recurring rent schedule.
+							</p>
+						</section>{/if}
+					<div class="onboarding-actions">
+						{#if onboardingStep > 1}<button
+								type="button"
+								class="secondary"
+								disabled={saving}
+								onclick={() => onboardingStep--}>Back</button
+							>{/if}{#if onboardingStep < 3}<button
+								type="button"
+								class="primary"
+								onclick={nextOnboarding}
+								>Continue to {onboardingStep === 1 ? 'lease details' : 'review'}</button
+							>{:else}<button
+								class="primary"
+								type="submit"
+								disabled={saving}
+								data-no-feedback="true">{saving ? 'Saving?' : 'Confirm tenant and lease'}</button
+							>{/if}
+					</div>
 				</form>{/if}
 		</section>
 	{:else if active === 'tenants'}
@@ -516,9 +872,9 @@
 							<h2>Tenant profiles</h2>
 							<p>See who is connected to each property, space, and lease at a glance.</p>
 						</div>
-						<span class="count">{tenantPeople.length}</span>
+						<span class="count">{filteredTenants.length} / {tenantPeople.length}</span>
 					</div>
-					{#if !tenantPeople.length}<div class="empty">
+					{#if !filteredTenants.length}<div class="empty">
 							<strong>No tenant profiles yet.</strong>
 							<p>Add the first tenant to begin.</p>
 						</div>{:else}<div class="tenant-table-wrap">
@@ -531,7 +887,7 @@
 									>
 								</thead>
 								<tbody>
-									{#each tenantPeople as person (person.id)}
+									{#each filteredTenants as person (person.id)}
 										{@const tenancy = currentTenancyFor(person.id)}
 										{@const assignedSpace = tenancy
 											? data.spaces.find((space: Space) => space.id === tenancy.space_id)
@@ -684,7 +1040,7 @@
 										value={selectedPerson.id_number ?? ''}
 									/></label
 								>
-						</div>
+							</div>
 							<label
 								>Notes<textarea name="notes" rows="2">{selectedPerson.notes ?? ''}</textarea></label
 							><button class="secondary" type="submit">Save profile</button>
@@ -750,20 +1106,12 @@
 														tenancy.rent_amount
 													)} · {label(tenancy.status)}</small
 												></span
-											>{#if tenancy.status === 'active'}<form
-													method="POST"
-													action="?/endTenancy"
-													class="inline-form"
-												>
-													<input type="hidden" name="tenancy_id" value={tenancy.id} /><input
-														name="move_out_date"
-														type="date"
-														required
-													/><input name="reason" placeholder="Reason (optional)" /><button
-														class="danger"
-														type="submit">End tenancy</button
-													>
-												</form>{/if}
+											><LeaseLifecycle
+												lease={tenancy}
+												held={depositHeld(tenancy.id)}
+												balance={leaseBalance(tenancy.id)}
+												currency={data.organization.currency_code}
+											/>
 										</div>{/each}
 								</div>{/if}
 						</section>
@@ -805,16 +1153,13 @@
 					<h2>Leases and rent schedules</h2>
 					<p>Monitor who occupies each space and update terms without losing the history.</p>
 				</div>
-				<span class="count">{data.tenancies.length}</span>
+				<span class="count">{filteredLeases.length} leases</span>
 			</div>
-			{#if !data.tenancies.length}<div class="empty">
+			{#if !filteredLeases.length}<div class="empty">
 					<strong>No lease records yet.</strong>
 					<p>Add a tenant and assign a space to create the first lease.</p>
 				</div>{:else}<div class="lease-list">
-					{#each data.tenancies as tenancy (tenancy.id)}<details
-							class="lease-card"
-							open={tenancy.status === 'active'}
-						>
+					{#each filteredLeases as tenancy (tenancy.id)}<details class="lease-card">
 							<summary
 								><span class="avatar">{personName(tenancy.id).slice(0, 1)}</span><span
 									><strong>{personName(tenancy.id)}</strong><small
@@ -825,80 +1170,88 @@
 									>{label(tenancy.status)}</span
 								></summary
 							>
-							<form method="POST" action="?/updateTenancy" class="form-grid four lease-edit">
-								<input type="hidden" name="tenancy_id" value={tenancy.id} /><label
-									>Status<select name="status"
-										><option value="draft" selected={tenancy.status === 'draft'}>Draft</option
-										><option value="active" selected={tenancy.status === 'active'}>Active</option
-										><option value="ending_soon" selected={tenancy.status === 'ending_soon'}
-											>Ending soon</option
-										><option value="completed" selected={tenancy.status === 'completed'}
-											>Completed</option
-										><option value="terminated" selected={tenancy.status === 'terminated'}
-											>Terminated</option
-										></select
-									></label
-								><label
-									>Start date<input
-										name="start_date"
-										type="date"
-										value={tenancy.start_date}
-										required
-									/></label
-								><label
-									>End date<input
-										name="end_date"
-										type="date"
-										value={tenancy.end_date ?? ''}
-									/></label
-								><label
-									>Rent<input
-										name="rent_amount"
-										type="number"
-										min="0"
-										step="0.01"
-										value={tenancy.rent_amount}
-										required
-									/></label
-								><label
-									>Deposit<input
-										name="deposit_amount"
-										type="number"
-										min="0"
-										step="0.01"
-										value={tenancy.deposit_amount}
-									/></label
-								><label
-									>Frequency<select name="billing_frequency"
-										><option value="monthly" selected={tenancy.billing_frequency === 'monthly'}
-											>Monthly</option
-										><option value="weekly" selected={tenancy.billing_frequency === 'weekly'}
-											>Weekly</option
-										><option value="quarterly" selected={tenancy.billing_frequency === 'quarterly'}
-											>Quarterly</option
-										><option value="annual" selected={tenancy.billing_frequency === 'annual'}
-											>Annual</option
-										></select
-									></label
-								><label
-									>Due day<input
-										name="rent_due_day"
-										type="number"
-										min="1"
-										max="31"
-										value={tenancy.rent_due_day ?? ''}
-									/></label
-								><label
-									>Notice days<input
-										name="notice_period_days"
-										type="number"
-										min="0"
-										value={tenancy.notice_period_days ?? ''}
-									/></label
-								><label class="wide"
-									>Notes<textarea name="notes" rows="2">{tenancy.notes ?? ''}</textarea></label
-								><button class="primary" type="submit">Save lease changes <span>→</span></button>
-							</form>
+							{#if ['draft', 'active', 'ending_soon'].includes(tenancy.status)}<form
+									method="POST"
+									action="?/updateTenancy"
+									use:enhance={workspaceSubmit}
+									data-managed-feedback="true"
+									class="form-grid four lease-edit"
+								>
+									<input type="hidden" name="tenancy_id" value={tenancy.id} /><label
+										>Status<select name="status"
+											><option value="draft" selected={tenancy.status === 'draft'}>Draft</option
+											><option value="active" selected={tenancy.status === 'active'}>Active</option
+											><option value="ending_soon" selected={tenancy.status === 'ending_soon'}
+												>Ending soon</option
+											></select
+										></label
+									><label
+										>Start date<input
+											name="start_date"
+											type="date"
+											value={tenancy.start_date}
+											required
+										/></label
+									><label
+										>End date<input
+											name="end_date"
+											type="date"
+											value={tenancy.end_date ?? ''}
+										/></label
+									><label
+										>Rent<input
+											name="rent_amount"
+											type="number"
+											min="0"
+											step="0.01"
+											value={tenancy.rent_amount}
+											required
+										/></label
+									><label
+										>Deposit<input
+											name="deposit_amount"
+											type="number"
+											min="0"
+											step="0.01"
+											value={tenancy.deposit_amount}
+										/></label
+									><label
+										>Frequency<select name="billing_frequency"
+											><option value="monthly" selected={tenancy.billing_frequency === 'monthly'}
+												>Monthly</option
+											><option value="weekly" selected={tenancy.billing_frequency === 'weekly'}
+												>Weekly</option
+											><option
+												value="quarterly"
+												selected={tenancy.billing_frequency === 'quarterly'}>Quarterly</option
+											><option value="annual" selected={tenancy.billing_frequency === 'annual'}
+												>Annual</option
+											></select
+										></label
+									><label
+										>Due day<input
+											name="rent_due_day"
+											type="number"
+											min="1"
+											max="31"
+											value={tenancy.rent_due_day ?? ''}
+										/></label
+									><label
+										>Notice days<input
+											name="notice_period_days"
+											type="number"
+											min="0"
+											value={tenancy.notice_period_days ?? ''}
+										/></label
+									><label class="wide"
+										>Notes<textarea name="notes" rows="2">{tenancy.notes ?? ''}</textarea></label
+									><button class="primary" type="submit">Save lease changes <span>→</span></button>
+								</form>{/if}<LeaseLifecycle
+								lease={tenancy}
+								held={depositHeld(tenancy.id)}
+								balance={leaseBalance(tenancy.id)}
+								currency={data.organization.currency_code}
+							/>
 						</details>{/each}
 				</div>{/if}
 		</section>
@@ -957,13 +1310,13 @@
 						<p class="eyebrow">Review queue</p>
 						<h3>Documents</h3>
 					</div>
-					<span class="count">{data.documents.length}</span>
+					<span class="count">{filteredDocuments.length} documents</span>
 				</div>
-				{#if !data.documents.length}<div class="empty">
+				{#if !filteredDocuments.length}<div class="empty">
 						<strong>No documents uploaded.</strong>
 						<p>Lease agreements and IDs will appear here.</p>
 					</div>{:else}<div class="document-list">
-						{#each data.documents as document (document.id)}<div class="document-row">
+						{#each filteredDocuments as document (document.id)}<div class="document-row">
 								<span class="file-icon">↗</span><span
 									><strong>{document.file_name}</strong><small
 										>{document.document_type} · {document.person_id
@@ -1006,7 +1359,9 @@
 					<strong>No move-outs recorded.</strong>
 					<p>When a tenant leaves, end the tenancy instead of deleting their profile.</p>
 				</div>{:else}<div class="table-list">
-					{#each endedTenancies as tenancy (tenancy.id)}<div class="table-row">
+					{#each filteredLeases.filter( (lease: Tenancy) => ['completed', 'terminated', 'expired'].includes(lease.status) ) as tenancy (tenancy.id)}<div
+							class="table-row"
+						>
 							<span class="avatar">{personName(tenancy.id).slice(0, 1)}</span><span
 								><strong>{personName(tenancy.id)}</strong><small
 									>{propertyName(tenancy.space_id)} · {spaceName(tenancy.space_id)}</small
@@ -1041,9 +1396,6 @@
 		line-height: 0.93;
 		letter-spacing: -0.075em;
 		color: var(--musha-ink);
-	}
-	.page-heading h1 span {
-		color: var(--musha-lime);
 	}
 	.page-heading p {
 		max-width: 700px;
@@ -1693,28 +2045,9 @@
 		gap: 7px;
 		justify-content: end;
 	}
-	.inline-form input {
-		width: auto;
-		min-width: 130px;
-	}
 	.profile-records .table-row.compact-row {
 		grid-template-columns: 1fr;
 		align-items: start;
-	}
-	.profile-records .inline-form {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		justify-content: stretch;
-		width: 100%;
-	}
-	.profile-records .inline-form input,
-	.profile-records .inline-form button {
-		box-sizing: border-box;
-		min-width: 0;
-		width: 100%;
-	}
-	.profile-records .inline-form button {
-		grid-column: 1 / -1;
 	}
 	.danger {
 		border: 0;
@@ -1899,6 +2232,645 @@
 		}
 		.section-tabs a {
 			white-space: nowrap;
+		}
+	}
+	/* People workspace: the same ivory, sage and forest system as the portfolio. */
+	.people-workspace {
+		--people-ink: #294334;
+		--people-muted: #7e8e6e;
+		--people-line: #dfe6d3;
+		color: var(--people-ink);
+		gap: 22px;
+	}
+	.people-workspace * {
+		box-sizing: border-box;
+	}
+	.page-heading {
+		align-items: center;
+		gap: 25px;
+	}
+	.page-heading h1 {
+		font-size: clamp(28px, 2.8vw, 40px);
+		font-weight: 500;
+		line-height: 1.18;
+		letter-spacing: -1.4px;
+		max-width: 950px;
+		color: #294334;
+	}
+	.page-heading h1 em {
+		font-family: Georgia, serif;
+		font-weight: 400;
+	}
+	.page-heading .intro-copy {
+		font-size: 11px;
+		line-height: 1.8;
+		color: #839172;
+		margin: 12px 0 0;
+	}
+	.eyebrow {
+		font-size: 8px;
+		letter-spacing: 1.6px;
+		font-weight: 500;
+		color: #8a9a77;
+		margin: 0 0 12px;
+	}
+	.primary,
+	.page-heading > .primary {
+		background: #294c38;
+		border-radius: 6px;
+		font-size: 11px;
+		font-weight: 500;
+		padding: 13px 18px;
+		line-height: 1.5;
+	}
+	.primary span {
+		color: #cfdfae;
+	}
+	.secondary,
+	.danger {
+		font-size: 11px;
+		font-weight: 500;
+		border-radius: 5px;
+	}
+	.secondary {
+		background: #edf2e4;
+		border-color: #d8e3c9;
+		color: #69844f;
+	}
+	.secondary-link,
+	.text-action {
+		font-size: 10px;
+		color: #6e8955;
+	}
+	.section-tabs {
+		background: #e9eedf;
+		border: 1px solid #dce5cf;
+		border-radius: 9px;
+		padding: 5px;
+		gap: 4px;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		scrollbar-width: thin;
+	}
+	.section-tabs a {
+		font-size: 10px;
+		font-weight: 500;
+		border-radius: 6px;
+		padding: 12px 17px;
+		white-space: nowrap;
+		color: #80926b;
+	}
+	.section-tabs a.active {
+		background: #fffefa;
+		color: #416034;
+		box-shadow: 0 3px 8px #29433408;
+	}
+	.section-tabs a:hover {
+		background: #f5f7ed;
+	}
+	.people-filters {
+		display: flex;
+		align-items: end;
+		gap: 15px;
+		background: #edf1e5;
+		padding: 17px 20px;
+		border: 1px solid #dfe6d3;
+		border-radius: 10px;
+	}
+	.people-filters label {
+		display: grid;
+		gap: 9px;
+		flex: 1;
+		min-width: 0;
+	}
+	.people-filters .people-search {
+		flex: 2;
+	}
+	.people-filters label > span {
+		font-size: 8px;
+		color: #8a9c75;
+	}
+	.people-filters input,
+	.people-filters select {
+		font: inherit;
+		font-size: 10px;
+		border: 1px solid #d9e3cb;
+		background: #fffefa;
+		padding: 11px 12px;
+		border-radius: 5px;
+		color: #667f4f;
+		min-width: 0;
+		width: 100%;
+	}
+	.people-filters button {
+		font: inherit;
+		font-size: 9px;
+		white-space: nowrap;
+		color: #7e9468;
+		border: 0;
+		background: none;
+		padding: 13px 5px;
+		cursor: pointer;
+	}
+	.metric-row {
+		gap: 12px;
+	}
+	.metric {
+		padding: 20px;
+		background: #fffefa;
+		border-color: #dce5cf;
+		border-radius: 12px;
+	}
+	.metric.emphasis {
+		background: #294c38;
+		border-color: #294c38;
+	}
+	.metric span,
+	.metric small {
+		font-size: 9px;
+		color: #8b9d77;
+		line-height: 1.7;
+	}
+	.metric strong {
+		font-size: 30px;
+		font-weight: 500;
+		letter-spacing: -1px;
+		margin: 13px 0 7px;
+	}
+	.metric.emphasis small,
+	.metric.emphasis span {
+		color: #bdcfaa;
+	}
+	.metric.emphasis strong {
+		color: #fffefa;
+	}
+	.panel {
+		background: #fffefa;
+		border-color: #dfe6d3;
+		border-radius: 12px;
+		padding: 25px;
+	}
+	.panel-heading h2,
+	.panel-heading h3 {
+		font-size: 19px;
+		font-weight: 500;
+		line-height: 1.35;
+		letter-spacing: -0.6px;
+		color: #385630;
+		margin: 0 0 10px;
+	}
+	.panel-heading p:not(.eyebrow) {
+		font-size: 11px;
+		color: #8b9a7a;
+		line-height: 1.9;
+		margin: 0;
+	}
+	.quick-actions {
+		gap: 10px;
+	}
+	.quick-actions a {
+		border-color: #e2e9d7;
+		background: #f9fbf4;
+		border-radius: 8px;
+		padding: 18px;
+	}
+	.quick-actions strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #4c6b39;
+	}
+	.quick-actions small {
+		font-size: 10px;
+		color: #95a382;
+		margin-top: 8px;
+		line-height: 1.7;
+	}
+	.quick-actions a > span {
+		color: #8ba76e;
+	}
+	.overview-grid {
+		grid-template-columns: 1fr 1.1fr;
+		gap: 18px;
+	}
+	.signal-list > div {
+		padding: 18px 0;
+		border-color: #e5ebdc;
+	}
+	.signal-list strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #5e794b;
+	}
+	.signal-list small,
+	.signal-list p {
+		font-size: 10px;
+		color: #95a580;
+		line-height: 1.8;
+	}
+	.signal-list b {
+		font-size: 12px;
+		font-weight: 500;
+		color: #8d784b;
+	}
+	.signal-dot {
+		background: #f5ecd9;
+		color: #a28b52;
+	}
+	.table-row {
+		border-color: #e2e9d8;
+		padding: 18px 15px;
+		border-radius: 7px;
+		gap: 18px;
+	}
+	.table-row strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #527040;
+	}
+	.table-row small {
+		font-size: 9px;
+		color: #93a580;
+		margin-top: 5px;
+		line-height: 1.7;
+	}
+	.avatar {
+		background: #e8eedc;
+		color: #819c60;
+		border-radius: 9px;
+		font-size: 12px;
+	}
+	.avatar.xl {
+		font-size: 26px;
+	}
+	.badge,
+	.performance-badge,
+	.occupancy-pill {
+		font-size: 8px;
+		font-weight: 500;
+		border-radius: 5px;
+		background: #edf2e4;
+		color: #7e9666;
+		padding: 7px 10px;
+	}
+	.badge.completed,
+	.badge.terminated,
+	.badge.expired {
+		background: #f4ecdd;
+		color: #aa8d57;
+	}
+	.tenant-table {
+		font-size: 11px;
+	}
+	.tenant-table th {
+		background: #edf1e5;
+		color: #81966a;
+		font-size: 9px;
+		font-weight: 500;
+		border-color: #dfe6d3;
+		padding: 16px;
+	}
+	.tenant-table td {
+		padding: 18px 16px;
+		border-color: #e6ecdc;
+		color: #6c8453;
+		font-size: 11px;
+	}
+	.tenant-table strong {
+		font-size: 12px;
+		font-weight: 500;
+	}
+	.tenant-table small {
+		font-size: 9px;
+		color: #98a787;
+	}
+	.view-button {
+		background: #edf2e4;
+		color: #719153;
+		border-color: #dde6d1;
+		font-size: 10px;
+		font-weight: 500;
+		border-radius: 5px;
+	}
+	.count {
+		background: #edf2e4;
+		color: #829a6b;
+		font-size: 9px;
+	}
+	.lease-card {
+		background: #fffefa;
+		border-color: #dde6d1;
+		border-radius: 10px;
+	}
+	.lease-card summary {
+		padding: 20px;
+		font-size: 11px;
+		color: #5e7849;
+		gap: 15px;
+	}
+	.lease-card summary strong {
+		font-size: 12px;
+		font-weight: 500;
+	}
+	.lease-card summary small {
+		font-size: 9px;
+		color: #98a584;
+		line-height: 1.8;
+	}
+	.lease-card summary > b {
+		font-size: 15px;
+		font-weight: 500;
+	}
+	.lease-edit {
+		background: #f6f8ef;
+		border-top: 1px solid #e1e8d5;
+		padding: 22px !important;
+	}
+	.form-stack label,
+	.form-grid label {
+		font-size: 11px;
+		font-weight: 500;
+		color: #6f8657;
+		line-height: 1.6;
+	}
+	.form-stack input,
+	.form-stack select,
+	.form-stack textarea,
+	.form-grid input,
+	.form-grid select,
+	.form-grid textarea {
+		font-size: 12px;
+		background: #fffefa;
+		border-color: #dce5cf;
+		border-radius: 5px;
+		color: #526d3f;
+		padding: 12px;
+	}
+	.form-stack input:focus,
+	.form-grid input:focus {
+		outline: 2px solid #b7c99a;
+		outline-offset: 2px;
+	}
+	.form-section {
+		border: 0;
+		border-top: 1px solid #dfe6d3;
+		padding: 24px 0 0;
+		margin: 0;
+		min-width: 0;
+	}
+	.form-section[hidden],
+	.checkin-card[hidden] {
+		display: none;
+	}
+	.onboarding-panel {
+		max-width: 1000px;
+	}
+	.onboarding-panel .panel-heading {
+		padding-bottom: 22px;
+		border-bottom: 1px solid #e6ecdc;
+	}
+	.onboarding-steps {
+		display: flex;
+		gap: 9px;
+		max-width: 1000px;
+	}
+	.onboarding-steps span {
+		flex: 1;
+		padding: 16px 18px;
+		background: #e9efdf;
+		border: 1px solid #dae5cc;
+		border-radius: 7px;
+		font-size: 10px;
+		color: #8aa16f;
+		line-height: 1.6;
+	}
+	.onboarding-steps span.current {
+		background: #294d38;
+		color: #e3eccf;
+		border-color: #294d38;
+	}
+	.onboarding-actions {
+		display: flex;
+		justify-content: space-between;
+		gap: 20px;
+		margin-top: 20px;
+		padding-top: 20px;
+		border-top: 1px solid #e3ead8;
+	}
+	.onboarding-actions .primary {
+		margin-left: auto;
+	}
+	.onboarding-review {
+		padding: 25px;
+		background: #f0f5e7;
+		border: 1px solid #dce8ce;
+		border-radius: 10px;
+	}
+	.onboarding-review h3 {
+		font-size: 21px;
+		font-weight: 500;
+		letter-spacing: -0.7px;
+	}
+	.onboarding-review dl {
+		margin: 20px 0;
+	}
+	.onboarding-review dl > div {
+		display: flex;
+		justify-content: space-between;
+		gap: 25px;
+		padding: 15px 0;
+		border-top: 1px solid #dce5ce;
+	}
+	.onboarding-review dt {
+		font-size: 10px;
+		color: #8da178;
+	}
+	.onboarding-review dd {
+		font-size: 12px;
+		color: #5a7845;
+		margin: 0;
+		text-align: right;
+		line-height: 1.8;
+	}
+	.onboarding-review > p:last-child {
+		font-size: 10px;
+		line-height: 1.9;
+		color: #8ea379;
+	}
+	.checkin-card {
+		background: #edf3e3;
+		border-color: #d7e4c7;
+		border-radius: 8px;
+	}
+	.checkin-card strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #647f4f;
+	}
+	.checkin-card small {
+		font-size: 10px;
+		color: #91a67b;
+		line-height: 1.8;
+	}
+	.profile-hero {
+		background: #eaf0df;
+		border-color: #d9e5c9;
+		border-radius: 12px;
+		padding: 25px;
+	}
+	.profile-hero h2 {
+		font-size: 28px;
+		letter-spacing: -1px;
+		font-weight: 500;
+	}
+	.profile-hero p {
+		font-size: 11px;
+		color: #889e73;
+	}
+	.profile-detail {
+		gap: 20px;
+	}
+	.document-row {
+		border-color: #e3ead8;
+	}
+	.document-row strong {
+		font-size: 11px;
+		font-weight: 500;
+		color: #607b49;
+	}
+	.document-row small {
+		font-size: 9px;
+		line-height: 1.8;
+		color: #96a784;
+	}
+	.empty {
+		background: #f8faf2;
+		border-color: #dce7ce;
+		padding: 30px;
+		border-radius: 10px;
+	}
+	.empty strong {
+		font-size: 13px;
+		font-weight: 500;
+		color: #6c8854;
+	}
+	.empty p,
+	.muted {
+		font-size: 11px;
+		line-height: 1.9;
+		color: #97a786;
+	}
+	.record-scope-note {
+		font-size: 9px;
+		color: #99a98a;
+		margin: 0;
+	}
+	.tenant-table-wrap {
+		scrollbar-width: thin;
+	}
+	.people-workspace a:focus-visible,
+	.people-workspace button:focus-visible,
+	.people-workspace summary:focus-visible,
+	.people-workspace select:focus-visible {
+		outline: 2px solid #98ad7a;
+		outline-offset: 3px;
+	}
+	.people-workspace button:disabled {
+		opacity: 0.5;
+		cursor: wait;
+	}
+	@media (max-width: 1000px) {
+		.overview-grid {
+			grid-template-columns: 1fr;
+		}
+		.metric-row {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.people-filters {
+			flex-wrap: wrap;
+		}
+		.people-filters .people-search {
+			flex-basis: 100%;
+		}
+		.page-heading {
+			align-items: start;
+			flex-direction: column;
+		}
+		.lease-edit.form-grid.four {
+			grid-template-columns: 1fr 1fr;
+		}
+	}
+	@media (max-width: 600px) {
+		.page-heading h1 {
+			font-size: 31px;
+			line-height: 1.16;
+		}
+		.metric {
+			padding: 17px 14px;
+		}
+		.metric strong {
+			font-size: 27px;
+		}
+		.metric-row {
+			gap: 10px;
+		}
+		.panel {
+			padding: 20px 16px;
+		}
+		.people-filters {
+			padding: 16px;
+			gap: 15px 10px;
+		}
+		.people-filters label {
+			flex-basis: 40%;
+		}
+		.people-filters .people-search {
+			flex-basis: 100%;
+		}
+		.section-tabs a {
+			font-size: 10px;
+			padding: 12px;
+		}
+		.onboarding-steps {
+			gap: 5px;
+		}
+		.onboarding-steps span {
+			font-size: 9px;
+			padding: 13px 10px;
+		}
+		.onboarding-review {
+			padding: 19px;
+		}
+		.onboarding-review dl > div {
+			flex-direction: column;
+			gap: 8px;
+		}
+		.onboarding-review dd {
+			text-align: left;
+		}
+		.lease-card summary {
+			flex-wrap: wrap;
+			padding: 16px;
+		}
+		.lease-edit.form-grid.four {
+			grid-template-columns: 1fr;
+		}
+		.profile-hero h2 {
+			font-size: 25px;
+		}
+		.table-row {
+			gap: 12px;
+		}
+		.onboarding-actions {
+			flex-wrap: wrap;
+		}
+		.onboarding-actions .primary {
+			font-size: 11px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.people-workspace * {
+			scroll-behavior: auto !important;
+			transition: none !important;
 		}
 	}
 </style>

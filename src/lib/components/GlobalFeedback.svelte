@@ -68,7 +68,7 @@
 	onMount(() => {
 		const onSubmit = (event: SubmitEvent) => {
 			const form = event.target;
-			if (form instanceof HTMLFormElement) {
+			if (form instanceof HTMLFormElement && form.dataset.managedFeedback !== 'true') {
 				markFormBusy(form, event.submitter instanceof HTMLButtonElement ? event.submitter : null);
 			}
 		};

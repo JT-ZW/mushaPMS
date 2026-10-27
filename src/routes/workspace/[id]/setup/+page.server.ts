@@ -17,7 +17,7 @@ export const load = async ({ locals, params, url }) => {
 			.order('created_at'),
 		locals.supabase
 			.from('spaces')
-			.select('id, property_id, name, kind, status, monthly_rent')
+			.select('id, property_id, parent_space_id, name, kind, status, monthly_rent')
 			.eq('organization_id', params.id)
 			.order('created_at'),
 		locals.supabase

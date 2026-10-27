@@ -1,5 +1,13 @@
 <script lang="ts">
-	/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, svelte/prefer-svelte-reactivity, svelte/require-each-key, svelte/no-navigation-without-resolve */
+	import { untrack } from 'svelte';
+	import { reportRange } from '$lib/dashboard/reporting';
+	import { organizationDate } from '$lib/dashboard/snapshot';
+	import { rentableSpaces } from '$lib/dashboard/portfolio';
+	import { isCurrentLease, expiresWithin } from '$lib/dashboard/leases';
+	import { enhance } from '$app/forms';
+	import { workspaceSubmit } from '$lib/forms/workspace-submit';
+
+	/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, svelte/require-each-key, svelte/no-navigation-without-resolve */
 	let { data } = $props();
 	type Row = Record<string, any>;
 	const properties: Row[] = $derived(data.properties ?? []);
@@ -7,17 +15,25 @@
 	const people: Row[] = $derived(data.people ?? []);
 	const tenancies: Row[] = $derived(data.tenancies ?? []);
 	const parties: Row[] = $derived(data.parties ?? []);
-	const charges: Row[] = $derived(data.charges ?? []);
+	const charges: Row[] = $derived(
+		(data.charges ?? []).filter((row: Row) => !['draft', 'void'].includes(row.status ?? 'issued'))
+	);
 	const payments: Row[] = $derived(data.payments ?? []);
 	const allocations: Row[] = $derived(data.paymentAllocations ?? []);
 	const maintenance: Row[] = $derived(data.maintenance ?? []);
 	const vendors: Row[] = $derived(data.maintenanceVendors ?? []);
 	const expenses: Row[] = $derived(data.propertyExpenses ?? []);
-	const today = new Date();
+	const today = $derived(
+		new Date(
+			organizationDate(new Date(), data.organization?.timezone || 'Africa/Harare') + 'T00:00:00Z'
+		)
+	);
 	const iso = (date: Date) => date.toISOString().slice(0, 10);
 	let period = $state('this_month');
-	let customStart = $state(iso(new Date(today.getFullYear(), today.getMonth(), 1)));
-	let customEnd = $state(iso(today));
+	let customStart = $state(
+		untrack(() => iso(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1))))
+	);
+	let customEnd = $state(untrack(() => iso(today)));
 	let view = $state('overview');
 	let propertyFilter = $state('all');
 	const currency = $derived(data.organization?.currency_code ?? 'USD');
@@ -25,7 +41,8 @@
 		new Intl.NumberFormat('en-US', {
 			style: 'currency',
 			currency,
-			maximumFractionDigits: 0
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2
 		}).format(Number(value ?? 0));
 	const number = (value: number | string | null | undefined) =>
 		new Intl.NumberFormat('en-US').format(Number(value ?? 0));
@@ -37,50 +54,48 @@
 			: '—';
 	const sum = (items: Row[], key = 'amount') =>
 		items.reduce((total, item) => total + Number(item[key] ?? 0), 0);
-	const range = () => {
-		const start = new Date(today.getFullYear(), today.getMonth(), 1);
-		const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-		if (period === 'last_month') {
-			start.setMonth(start.getMonth() - 1);
-			end.setDate(0);
-		}
-		if (period === 'this_quarter') {
-			start.setMonth(Math.floor(today.getMonth() / 3) * 3);
-			end.setMonth(start.getMonth() + 3, 0);
-		}
-		if (period === 'this_year') {
-			start.setMonth(0, 1);
-			end.setMonth(11, 31);
-		}
-		if (period === 'custom') return { start: customStart, end: customEnd };
-		return { start: iso(start), end: iso(end) };
-	};
+	const range = () => reportRange(iso(today), period, customStart, customEnd);
 	const inRange = (value: string | null | undefined) => {
 		if (!value) return false;
 		const r = range();
-		return value.slice(0, 10) >= r.start && value.slice(0, 10) <= r.end;
+		return r.valid && value.slice(0, 10) >= r.start && value.slice(0, 10) <= r.end;
 	};
 	const allocationForCharge = (chargeId: string) =>
-		sum(allocations.filter((item) => item.charge_id === chargeId));
+		sum(
+			allocations.filter(
+				(item) =>
+					item.charge_id === chargeId &&
+					payments.some(
+						(payment) => payment.id === item.payment_id && payment.payment_date <= iso(today)
+					)
+			)
+		);
 	const allocationForPayment = (paymentId: string) =>
 		sum(allocations.filter((item) => item.payment_id === paymentId));
 	const tenancyForSpace = (spaceId: string) =>
-		tenancies.find(
-			(item) => item.space_id === spaceId && ['active', 'ending_soon'].includes(item.status)
-		);
+		tenancies.find((item) => item.space_id === spaceId && isCurrentLease(item as any, iso(today)));
 	const propertyName = (id: string) =>
 		properties.find((item) => item.id === id)?.name ?? 'Unassigned';
 	const personName = (id: string | null | undefined) => {
 		const person = people.find((item) => item.id === id);
 		return person ? `${person.first_name} ${person.last_name}` : 'Unassigned';
 	};
-	const activeSpaces = $derived(spaces.filter((space) => space.status !== 'inactive'));
-	const occupiedSpaces = $derived(
-		activeSpaces.filter((space) => space.status === 'occupied' || tenancyForSpace(space.id))
-	);
+	const activeSpaces = $derived(rentableSpaces<any>(properties as any, spaces as any));
+	const occupiedSpaces = $derived(activeSpaces.filter((space) => space.status === 'occupied'));
 	const periodCharges = $derived(charges.filter((charge) => inRange(charge.due_on)));
-	const periodPayments = $derived(payments.filter((payment) => inRange(payment.payment_date)));
-	const periodExpenses = $derived(expenses.filter((expense) => inRange(expense.expense_date)));
+	const periodPayments = $derived(
+		payments.filter(
+			(payment) => inRange(payment.payment_date) && payment.payment_date <= iso(today)
+		)
+	);
+	const periodExpenses = $derived(
+		expenses.filter(
+			(expense) =>
+				inRange(expense.expense_date) &&
+				expense.expense_date <= iso(today) &&
+				expense.approval_status === 'approved'
+		)
+	);
 	const openMaintenance = $derived(
 		maintenance.filter((item) => !['completed', 'closed'].includes(item.status))
 	);
@@ -100,11 +115,17 @@
 		)
 	);
 	const maintenanceCost = $derived(
-		sum(periodExpenses.filter((item) => ['repairs', 'contractor'].includes(item.category))) +
-			sum(
-				maintenance.filter((item) => inRange(item.completed_at ?? item.created_at)),
-				'actual_cost'
-			)
+		sum(
+			maintenance.filter((item) => inRange(item.completed_at ?? item.created_at)),
+			'actual_cost'
+		)
+	);
+	const settled = $derived(
+		sum(
+			periodCharges.map((charge) => ({
+				amount: Math.min(Number(charge.amount), allocationForCharge(charge.id))
+			}))
+		)
 	);
 	const propertyRows = () =>
 		properties.map((property) => {
@@ -124,13 +145,11 @@
 			const propertyMaintenance = maintenance.filter(
 				(item) => item.property_id === property.id && inRange(item.completed_at ?? item.created_at)
 			);
-			const expenseTotal = sum(propertyExpenses) + sum(propertyMaintenance, 'actual_cost');
+			const expenseTotal = sum(propertyExpenses);
 			return {
 				property,
 				spaces: propertySpaces.length,
-				occupied: propertySpaces.filter(
-					(space) => space.status === 'occupied' || tenancyForSpace(space.id)
-				).length,
+				occupied: propertySpaces.filter((space) => space.status === 'occupied').length,
 				potential: sum(propertySpaces, 'monthly_rent'),
 				billed: sum(propertyCharges),
 				collected: sum(propertyPayments),
@@ -179,13 +198,7 @@
 				};
 			});
 	const leaseExpiry = (days: number) =>
-		tenancies.filter(
-			(tenancy) =>
-				tenancy.end_date &&
-				tenancy.end_date >= iso(today) &&
-				tenancy.end_date <=
-					iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + days))
-		);
+		tenancies.filter((lease) => expiresWithin(lease as any, iso(today), days));
 	const categories = $derived([...new Set(maintenance.map((item) => item.category))]);
 	const maintenanceByCategory = () =>
 		categories
@@ -253,22 +266,25 @@
 				href: 'maintenance'
 			}
 		].filter((item) => item.count > 0);
-	const views = [
+	const views = $derived([
 		['overview', 'Executive overview'],
 		['properties', 'Property performance'],
 		['tenants', 'Tenants & leases'],
 		['revenue', 'Revenue & collections'],
 		['maintenance', 'Maintenance analytics'],
 		['finance', 'Operating finance'],
-		['quality', 'Data quality']
-	];
+		['quality', 'Data quality'],
+		...(data.membership && ['owner', 'admin', 'manager'].includes(data.membership.role)
+			? [['audit', 'Audit history']]
+			: [])
+	]);
 </script>
 
 <div class="reports-shell">
 	<div class="report-toolbar">
 		<div>
 			<p class="eyebrow">Decision centre</p>
-			<h2>Reports that keep the portfolio honest<span>.</span></h2>
+			<h2>A clearer picture. Better decisions.</h2>
 			<p class="muted">
 				Every view is calculated from properties, leases, charges, payments, work orders and
 				expenses.
@@ -294,451 +310,522 @@
 				onclick={() => (view = item[0])}>{item[1]}</button
 			>{/each}
 	</nav>
-
-	{#if view === 'overview'}
-		<div class="metric-grid">
-			<div class="metric accent">
-				<span>Rentable spaces</span><strong>{number(activeSpaces.length)}</strong><small
-					>{number(occupiedSpaces.length)} occupied · {number(
-						activeSpaces.length - occupiedSpaces.length
-					)} vacant</small
-				>
-			</div>
-			<div class="metric">
-				<span>Occupancy rate</span><strong
-					>{activeSpaces.length
-						? Math.round((occupiedSpaces.length / activeSpaces.length) * 100)
-						: 0}%</strong
-				><small>Across the selected portfolio</small>
-			</div>
-			<div class="metric">
-				<span>Active tenancies</span><strong
-					>{number(
-						tenancies.filter((item) => ['active', 'ending_soon'].includes(item.status)).length
-					)}</strong
-				><small>{number(leaseExpiry(30).length)} expiry within 30 days</small>
-			</div>
-			<div class="metric">
-				<span>Rent billed</span><strong>{money(billed)}</strong><small
-					>{money(outstanding)} currently outstanding</small
-				>
-			</div>
-			<div class="metric">
-				<span>Rent collected</span><strong>{money(collected)}</strong><small
-					>{billed ? Math.round((collected / billed) * 100) : 0}% collection rate</small
-				>
-			</div>
-			<div class="metric">
-				<span>Maintenance watch</span><strong>{number(openMaintenance.length)}</strong><small
-					>{number(overdueMaintenance.length)} overdue · {money(maintenanceCost)} cost</small
-				>
-			</div>
-		</div>
-		<div class="report-grid two">
-			<section class="report-card">
-				<div class="card-heading">
-					<div>
-						<p class="eyebrow">Portfolio pulse</p>
-						<h3>What needs a decision?</h3>
-					</div>
-					<span class="signal">{dataQuality().length} data checks</span>
-				</div>
-				<div class="insight-list">
-					<div>
-						<span>Leases expiring in 30 / 60 / 90 days</span><strong
-							>{leaseExpiry(30).length} / {leaseExpiry(60).length} / {leaseExpiry(90)
-								.length}</strong
-						>
-					</div>
-					<div>
-						<span>Overdue maintenance work</span><strong>{overdueMaintenance.length}</strong>
-					</div>
-					<div>
-						<span>Top arrears account</span><strong
-							>{tenantRows().sort((a, b) => b.balance - a.balance)[0]?.person
-								? `${tenantRows().sort((a, b) => b.balance - a.balance)[0].person.first_name} · ${money(tenantRows().sort((a, b) => b.balance - a.balance)[0].balance)}`
-								: 'No arrears recorded'}</strong
-						>
-					</div>
-					<div>
-						<span>Highest maintenance category</span><strong
-							>{maintenanceByCategory()[0]?.category?.replaceAll('_', ' ') ??
-								'No requests yet'}</strong
-						>
-					</div>
-				</div>
-			</section>
-			<section class="report-card">
-				<div class="card-heading">
-					<div>
-						<p class="eyebrow">Collections</p>
-						<h3>Rent performance</h3>
-					</div>
-					<strong class="big-number">{billed ? Math.round((collected / billed) * 100) : 0}%</strong>
-				</div>
-				<div class="progress">
-					<span style={`width:${billed ? Math.min(100, (collected / billed) * 100) : 0}%`}></span>
-				</div>
-				<div class="split">
-					<span>Collected <strong>{money(collected)}</strong></span><span
-						>Outstanding <strong>{money(outstanding)}</strong></span
+	<p class="report-scope">
+		Financial figures follow the reporting period. Occupancy and open work show current status.
+		Amounts in {currency}; expenses include approved records only.
+	</p>
+	{#if range().valid}
+		{#if view === 'overview'}
+			<div class="metric-grid">
+				<div class="metric accent">
+					<span>Rentable spaces</span><strong>{number(activeSpaces.length)}</strong><small
+						>{number(occupiedSpaces.length)} occupied · {number(
+							activeSpaces.filter((space) => space.status === 'vacant').length
+						)} vacant</small
 					>
 				</div>
-				<p class="muted">
-					Payment allocation is used for charge-level arrears, so the number remains explainable.
-				</p>
-			</section>
-		</div>
-	{:else if view === 'properties'}
-		<section class="report-card">
-			<div class="card-heading">
-				<div>
-					<p class="eyebrow">Property performance</p>
-					<h3>Which locations are carrying the portfolio?</h3>
+				<div class="metric">
+					<span>Occupancy rate</span><strong
+						>{activeSpaces.length
+							? Math.round((occupiedSpaces.length / activeSpaces.length) * 100)
+							: 0}%</strong
+					><small>Across the selected portfolio</small>
 				</div>
-				<select bind:value={propertyFilter}
-					><option value="all">All properties</option>{#each properties as property}<option
-							value={property.id}>{property.name}</option
-						>{/each}</select
-				>
-			</div>
-			<div class="table-wrap">
-				<table>
-					<thead
-						><tr
-							><th>Property</th><th>Spaces</th><th>Occupancy</th><th>Rent potential</th><th
-								>Billed</th
-							><th>Collected</th><th>Arrears</th><th>Net position</th></tr
-						></thead
-					><tbody
-						>{#each propertyRows().filter((row) => propertyFilter === 'all' || row.property.id === propertyFilter) as row}<tr
-								><td
-									><strong>{row.property.name}</strong><small
-										>{row.property.city ?? 'Location not set'}</small
-									></td
-								><td>{row.occupied} / {row.spaces}</td><td
-									>{row.spaces ? Math.round((row.occupied / row.spaces) * 100) : 0}%</td
-								><td>{money(row.potential)}</td><td>{money(row.billed)}</td><td
-									>{money(row.collected)}</td
-								><td class:warning={row.arrears > 0}>{money(row.arrears)}</td><td
-									class:positive={row.net >= 0}
-									class:warning={row.net < 0}>{money(row.net)}</td
-								></tr
-							>{:else}<tr
-								><td colspan="8" class="empty"
-									>Add properties and spaces to start comparing performance.</td
-								></tr
-							>{/each}</tbody
+				<div class="metric">
+					<span>Active tenancies</span><strong
+						>{number(
+							tenancies.filter((item) => isCurrentLease(item as any, iso(today))).length
+						)}</strong
+					><small>{number(leaseExpiry(30).length)} expiry within 30 days</small>
+				</div>
+				<div class="metric">
+					<span>Rent billed</span><strong>{money(billed)}</strong><small
+						>{money(outstanding)} currently outstanding</small
 					>
-				</table>
-			</div>
-		</section>
-	{:else if view === 'tenants'}
-		<div class="metric-grid compact">
-			<div class="metric">
-				<span>Active tenants</span><strong>{tenantRows().filter((row) => row.active).length}</strong
-				>
-			</div>
-			<div class="metric">
-				<span>New in period</span><strong
-					>{tenancies.filter((item) => inRange(item.start_date)).length}</strong
-				>
-			</div>
-			<div class="metric">
-				<span>Move-outs in period</span><strong
-					>{tenancies.filter((item) => inRange(item.end_date)).length}</strong
-				>
-			</div>
-			<div class="metric">
-				<span>Lease expiries · 90 days</span><strong>{leaseExpiry(90).length}</strong>
-			</div>
-		</div>
-		<section class="report-card">
-			<div class="card-heading">
-				<div>
-					<p class="eyebrow">Tenant and lease analytics</p>
-					<h3>Occupancy relationships and balances</h3>
 				</div>
-				<a class="text-link" href={`/workspace/${data.organization.id}/people`}
-					>Open people & leases →</a
-				>
-			</div>
-			<div class="table-wrap">
-				<table>
-					<thead
-						><tr
-							><th>Tenant</th><th>Current space</th><th>Lease status</th><th>Start / end</th><th
-								>Paid in period</th
-							><th>Balance</th></tr
-						></thead
-					><tbody
-						>{#each tenantRows() as row}<tr
-								><td
-									><strong>{row.person.first_name} {row.person.last_name}</strong><small
-										>{row.person.email ?? 'No email'}</small
-									></td
-								><td
-									>{row.latest
-										? `${propertyName(spaces.find((space) => space.id === row.latest.space_id)?.property_id)} · ${spaces.find((space) => space.id === row.latest.space_id)?.name ?? 'Space'}`
-										: 'No tenancy'}</td
-								><td
-									><span class="tag" class:tag-good={row.active}
-										>{row.active ? 'Active' : 'Historical'}</span
-									></td
-								><td
-									>{row.latest
-										? `${dateLabel(row.latest.start_date)} → ${dateLabel(row.latest.end_date)}`
-										: '—'}</td
-								><td>{money(row.paid)}</td><td class:warning={row.balance > 0}
-									>{money(row.balance)}</td
-								></tr
-							>{:else}<tr
-								><td colspan="6" class="empty"
-									>Add tenant and lease records to see tenant analytics.</td
-								></tr
-							>{/each}</tbody
+				<div class="metric">
+					<span>Cash received</span><strong>{money(collected)}</strong><small
+						>{billed
+							? `${Math.round((settled / billed) * 100)}% of charges settled`
+							: 'No issued charges'}</small
 					>
-				</table>
+				</div>
+				<div class="metric">
+					<span>Maintenance watch</span><strong>{number(openMaintenance.length)}</strong><small
+						>{number(overdueMaintenance.length)} overdue · {money(maintenanceCost)} cost</small
+					>
+				</div>
 			</div>
-		</section>
-	{:else if view === 'revenue'}
-		<div class="report-grid two">
-			<section class="report-card">
-				<div class="card-heading">
-					<div>
-						<p class="eyebrow">Revenue and collections</p>
-						<h3>Money in the selected period</h3>
+			<div class="report-grid two">
+				<section class="report-card">
+					<div class="card-heading">
+						<div>
+							<p class="eyebrow">Portfolio pulse</p>
+							<h3>What needs a decision?</h3>
+						</div>
+						<span class="signal">{dataQuality().length} data checks</span>
 					</div>
-				</div>
-				<div class="finance-lines">
-					<div><span>Rent billed</span><strong>{money(billed)}</strong></div>
-					<div><span>Rent collected</span><strong>{money(collected)}</strong></div>
-					<div>
-						<span>Outstanding rent</span><strong class="warning-text">{money(outstanding)}</strong>
-					</div>
-					<div>
-						<span>Deposits and other charges</span><strong
-							>{money(sum(periodCharges.filter((item) => item.charge_type !== 'rent')))}</strong
-						>
-					</div>
-				</div>
-				<div class="method-list">
-					{#each [...new Set(periodPayments.map((item) => item.method))] as method}<div>
-							<span>{method.replaceAll('_', ' ')}</span><strong
-								>{money(sum(periodPayments.filter((item) => item.method === method)))}</strong
+					<div class="insight-list">
+						<div>
+							<span>Leases expiring in 30 / 60 / 90 days</span><strong
+								>{leaseExpiry(30).length} / {leaseExpiry(60).length} / {leaseExpiry(90)
+									.length}</strong
 							>
-						</div>{:else}<p class="muted">No payments recorded for this period.</p>{/each}
-				</div>
-			</section>
+						</div>
+						<div>
+							<span>Overdue maintenance work</span><strong>{overdueMaintenance.length}</strong>
+						</div>
+						<div>
+							<span>Top arrears account</span><strong
+								>{tenantRows().sort((a, b) => b.balance - a.balance)[0]?.person
+									? `${tenantRows().sort((a, b) => b.balance - a.balance)[0].person.first_name} · ${money(tenantRows().sort((a, b) => b.balance - a.balance)[0].balance)}`
+									: 'No arrears recorded'}</strong
+							>
+						</div>
+						<div>
+							<span>Highest maintenance category</span><strong
+								>{maintenanceByCategory()[0]?.category?.replaceAll('_', ' ') ??
+									'No requests yet'}</strong
+							>
+						</div>
+					</div>
+				</section>
+				<section class="report-card">
+					<div class="card-heading">
+						<div>
+							<p class="eyebrow">Collections</p>
+							<h3>Charge settlement</h3>
+						</div>
+						<strong class="big-number"
+							>{billed ? `${Math.round((settled / billed) * 100)}%` : '?'}</strong
+						>
+					</div>
+					<div class="progress">
+						<span style={`width:${billed ? Math.min(100, (settled / billed) * 100) : 0}%`}></span>
+					</div>
+					<div class="split">
+						<span>Allocated <strong>{money(settled)}</strong></span><span
+							>Outstanding <strong>{money(outstanding)}</strong></span
+						>
+					</div>
+					<p class="muted">
+						Settlement uses allocations against charges due in the selected period. Cash receipts
+						are reported separately by payment date.
+					</p>
+				</section>
+			</div>
+		{:else if view === 'properties'}
 			<section class="report-card">
 				<div class="card-heading">
 					<div>
-						<p class="eyebrow">Payment allocation</p>
-						<h3>Match receipts to charges</h3>
-						<p class="muted">Linking payments to charges makes arrears auditable.</p>
+						<p class="eyebrow">Property performance</p>
+						<h3>Which locations are carrying the portfolio?</h3>
 					</div>
-				</div>
-				<form method="POST" action="?/allocatePayment" class="form-stack">
-					<label
-						>Payment<select name="payment_id" required
-							><option value="">Choose payment</option
-							>{#each payments.filter((payment) => allocationForPayment(payment.id) < Number(payment.amount)) as payment}<option
-									value={payment.id}
-									>{dateLabel(payment.payment_date)} · {money(payment.amount)} · {payment.reference ??
-										payment.method}</option
-								>{/each}</select
-						></label
-					><label
-						>Charge<select name="charge_id" required
-							><option value="">Choose charge</option>{#each periodCharges as charge}<option
-									value={charge.id}
-									>{dateLabel(charge.due_on)} · {charge.description} · {money(
-										charge.amount - allocationForCharge(charge.id)
-									)} open</option
-								>{/each}</select
-						></label
-					><label>Amount<input name="amount" type="number" step="0.01" min="0.01" required /></label
-					><button class="primary" type="submit">Allocate payment <span>→</span></button>
-				</form>
-			</section>
-		</div>
-	{:else if view === 'maintenance'}
-		<div class="metric-grid compact">
-			<div class="metric"><span>Open requests</span><strong>{openMaintenance.length}</strong></div>
-			<div class="metric">
-				<span>Completed in period</span><strong
-					>{maintenance.filter(
-						(item) =>
-							['completed', 'closed'].includes(item.status) &&
-							inRange(item.completed_at ?? item.updated_at)
-					).length}</strong
-				>
-			</div>
-			<div class="metric">
-				<span>Overdue SLA</span><strong class:warning-text={overdueMaintenance.length > 0}
-					>{overdueMaintenance.length}</strong
-				>
-			</div>
-			<div class="metric">
-				<span>Maintenance cost</span><strong>{money(maintenanceCost)}</strong>
-			</div>
-		</div>
-		<div class="report-grid two">
-			<section class="report-card">
-				<div class="card-heading">
-					<div>
-						<p class="eyebrow">By category</p>
-						<h3>Where work is concentrated</h3>
-					</div>
-				</div>
-				{#each maintenanceByCategory() as item}<div class="bar-line">
-						<span>{item.category.replaceAll('_', ' ')}</span><strong
-							>{item.count} · {money(item.cost)}</strong
-						><i
-							style={`width:${maintenance.length ? Math.max(6, (item.count / maintenance.length) * 100) : 0}%`}
-						></i>
-					</div>{:else}<p class="empty">No maintenance requests recorded.</p>{/each}
-			</section>
-			<section class="report-card">
-				<div class="card-heading">
-					<div>
-						<p class="eyebrow">By vendor</p>
-						<h3>Delivery and spend</h3>
-					</div>
-					<a class="text-link" href={`/workspace/${data.organization.id}/maintenance`}
-						>Open maintenance →</a
+					<select bind:value={propertyFilter}
+						><option value="all">All properties</option>{#each properties as property}<option
+								value={property.id}>{property.name}</option
+							>{/each}</select
 					>
 				</div>
-				{#each vendors as vendor}<div class="insight-row">
-						<span
-							>{vendor.business_name}<small
-								>{vendor.specialties?.join?.(', ') ?? 'General contractor'}</small
-							></span
-						><strong
-							>{money(
-								sum(
-									maintenance.filter((item) => item.vendor_id === vendor.id),
-									'actual_cost'
-								)
-							)}</strong
+				<div class="table-wrap">
+					<table>
+						<thead
+							><tr
+								><th>Property</th><th>Spaces</th><th>Occupancy</th><th>Rent potential</th><th
+									>Billed</th
+								><th>Collected</th><th>Arrears</th><th>Net position</th></tr
+							></thead
+						><tbody
+							>{#each propertyRows().filter((row) => propertyFilter === 'all' || row.property.id === propertyFilter) as row}<tr
+									><td
+										><strong>{row.property.name}</strong><small
+											>{row.property.city ?? 'Location not set'}</small
+										></td
+									><td>{row.occupied} / {row.spaces}</td><td
+										>{row.spaces ? Math.round((row.occupied / row.spaces) * 100) : 0}%</td
+									><td>{money(row.potential)}</td><td>{money(row.billed)}</td><td
+										>{money(row.collected)}</td
+									><td class:warning={row.arrears > 0}>{money(row.arrears)}</td><td
+										class:positive={row.net >= 0}
+										class:warning={row.net < 0}>{money(row.net)}</td
+									></tr
+								>{:else}<tr
+									><td colspan="8" class="empty"
+										>Add properties and spaces to start comparing performance.</td
+									></tr
+								>{/each}</tbody
 						>
-					</div>{:else}<p class="empty">Add vendors to compare contractor cost.</p>{/each}
+					</table>
+				</div>
 			</section>
-		</div>
-	{:else if view === 'finance'}
-		<div class="report-grid two">
+		{:else if view === 'tenants'}
+			<div class="metric-grid compact">
+				<div class="metric">
+					<span>Active tenants</span><strong
+						>{tenantRows().filter((row) => row.active).length}</strong
+					>
+				</div>
+				<div class="metric">
+					<span>New in period</span><strong
+						>{tenancies.filter((item) => inRange(item.start_date)).length}</strong
+					>
+				</div>
+				<div class="metric">
+					<span>Move-outs in period</span><strong
+						>{tenancies.filter((item) => inRange(item.end_date)).length}</strong
+					>
+				</div>
+				<div class="metric">
+					<span>Lease expiries · 90 days</span><strong>{leaseExpiry(90).length}</strong>
+				</div>
+			</div>
 			<section class="report-card">
 				<div class="card-heading">
 					<div>
-						<p class="eyebrow">Operating finance</p>
-						<h3>Record a property expense</h3>
+						<p class="eyebrow">Tenant and lease analytics</p>
+						<h3>Occupancy relationships and balances</h3>
+					</div>
+					<a class="text-link" href={`/workspace/${data.organization.id}/people`}
+						>Open people & leases →</a
+					>
+				</div>
+				<div class="table-wrap">
+					<table>
+						<thead
+							><tr
+								><th>Tenant</th><th>Current space</th><th>Lease status</th><th>Start / end</th><th
+									>Paid in period</th
+								><th>Balance</th></tr
+							></thead
+						><tbody
+							>{#each tenantRows() as row}<tr
+									><td
+										><strong>{row.person.first_name} {row.person.last_name}</strong><small
+											>{row.person.email ?? 'No email'}</small
+										></td
+									><td
+										>{row.latest
+											? `${propertyName(spaces.find((space) => space.id === row.latest.space_id)?.property_id)} · ${spaces.find((space) => space.id === row.latest.space_id)?.name ?? 'Space'}`
+											: 'No tenancy'}</td
+									><td
+										><span class="tag" class:tag-good={row.active}
+											>{row.active ? 'Active' : 'Historical'}</span
+										></td
+									><td
+										>{row.latest
+											? `${dateLabel(row.latest.start_date)} → ${dateLabel(row.latest.end_date)}`
+											: '—'}</td
+									><td>{money(row.paid)}</td><td class:warning={row.balance > 0}
+										>{money(row.balance)}</td
+									></tr
+								>{:else}<tr
+									><td colspan="6" class="empty"
+										>Add tenant and lease records to see tenant analytics.</td
+									></tr
+								>{/each}</tbody
+						>
+					</table>
+				</div>
+			</section>
+		{:else if view === 'revenue'}
+			<div class="report-grid two">
+				<section class="report-card">
+					<div class="card-heading">
+						<div>
+							<p class="eyebrow">Revenue and collections</p>
+							<h3>Money in the selected period</h3>
+						</div>
+					</div>
+					<div class="finance-lines">
+						<div><span>Rent billed</span><strong>{money(billed)}</strong></div>
+						<div><span>Rent collected</span><strong>{money(collected)}</strong></div>
+						<div>
+							<span>Outstanding rent</span><strong class="warning-text">{money(outstanding)}</strong
+							>
+						</div>
+						<div>
+							<span>Deposits and other charges</span><strong
+								>{money(sum(periodCharges.filter((item) => item.charge_type !== 'rent')))}</strong
+							>
+						</div>
+					</div>
+					<div class="method-list">
+						{#each [...new Set(periodPayments.map((item) => item.method))] as method}<div>
+								<span>{method.replaceAll('_', ' ')}</span><strong
+									>{money(sum(periodPayments.filter((item) => item.method === method)))}</strong
+								>
+							</div>{:else}<p class="muted">No payments recorded for this period.</p>{/each}
+					</div>
+				</section>
+				<section class="report-card">
+					<div class="card-heading">
+						<div>
+							<p class="eyebrow">Payment allocation</p>
+							<h3>Match receipts to charges</h3>
+							<p class="muted">Linking payments to charges makes arrears auditable.</p>
+						</div>
+					</div>
+					<form
+						data-managed-feedback="true"
+						use:enhance={workspaceSubmit}
+						method="POST"
+						action="?/allocatePayment"
+						class="form-stack"
+					>
+						<label
+							>Payment<select name="payment_id" required
+								><option value="">Choose payment</option
+								>{#each payments.filter((payment) => allocationForPayment(payment.id) < Number(payment.amount)) as payment}<option
+										value={payment.id}
+										>{dateLabel(payment.payment_date)} · {money(payment.amount)} · {payment.reference ??
+											payment.method}</option
+									>{/each}</select
+							></label
+						><label
+							>Charge<select name="charge_id" required
+								><option value="">Choose charge</option>{#each periodCharges as charge}<option
+										value={charge.id}
+										>{dateLabel(charge.due_on)} · {charge.description} · {money(
+											charge.amount - allocationForCharge(charge.id)
+										)} open</option
+									>{/each}</select
+							></label
+						><label
+							>Amount<input name="amount" type="number" step="0.01" min="0.01" required /></label
+						><button class="primary" type="submit">Allocate payment <span>→</span></button>
+					</form>
+				</section>
+			</div>
+		{:else if view === 'maintenance'}
+			<div class="metric-grid compact">
+				<div class="metric">
+					<span>Open requests</span><strong>{openMaintenance.length}</strong>
+				</div>
+				<div class="metric">
+					<span>Completed in period</span><strong
+						>{maintenance.filter(
+							(item) =>
+								['completed', 'closed'].includes(item.status) &&
+								inRange(item.completed_at ?? item.updated_at)
+						).length}</strong
+					>
+				</div>
+				<div class="metric">
+					<span>Overdue SLA</span><strong class:warning-text={overdueMaintenance.length > 0}
+						>{overdueMaintenance.length}</strong
+					>
+				</div>
+				<div class="metric">
+					<span>Maintenance cost</span><strong>{money(maintenanceCost)}</strong>
+				</div>
+			</div>
+			<div class="report-grid two">
+				<section class="report-card">
+					<div class="card-heading">
+						<div>
+							<p class="eyebrow">By category</p>
+							<h3>Where work is concentrated</h3>
+						</div>
+					</div>
+					{#each maintenanceByCategory() as item}<div class="bar-line">
+							<span>{item.category.replaceAll('_', ' ')}</span><strong
+								>{item.count} · {money(item.cost)}</strong
+							><i
+								style={`width:${maintenance.length ? Math.max(6, (item.count / maintenance.length) * 100) : 0}%`}
+							></i>
+						</div>{:else}<p class="empty">No maintenance requests recorded.</p>{/each}
+				</section>
+				<section class="report-card">
+					<div class="card-heading">
+						<div>
+							<p class="eyebrow">By vendor</p>
+							<h3>Delivery and spend</h3>
+						</div>
+						<a class="text-link" href={`/workspace/${data.organization.id}/maintenance`}
+							>Open maintenance →</a
+						>
+					</div>
+					{#each vendors as vendor}<div class="insight-row">
+							<span
+								>{vendor.business_name}<small
+									>{vendor.specialties?.join?.(', ') ?? 'General contractor'}</small
+								></span
+							><strong
+								>{money(
+									sum(
+										maintenance.filter((item) => item.vendor_id === vendor.id),
+										'actual_cost'
+									)
+								)}</strong
+							>
+						</div>{:else}<p class="empty">Add vendors to compare contractor cost.</p>{/each}
+				</section>
+			</div>
+		{:else if view === 'finance'}
+			<div class="report-grid two">
+				<section class="report-card">
+					<div class="card-heading">
+						<div>
+							<p class="eyebrow">Operating finance</p>
+							<h3>Record a property expense</h3>
+							<p class="muted">
+								Rates, insurance, utilities, security, staff and contractor costs roll into net
+								position.
+							</p>
+						</div>
+					</div>
+					<form
+						data-managed-feedback="true"
+						use:enhance={workspaceSubmit}
+						method="POST"
+						action="?/addExpense"
+						class="form-stack"
+					>
+						<div class="form-grid two">
+							<label
+								>Property<select name="property_id" required
+									><option value="">Choose property</option>{#each properties as property}<option
+											value={property.id}>{property.name}</option
+										>{/each}</select
+								></label
+							><label
+								>Category<select name="category" required
+									>{#each ['rates', 'insurance', 'utilities', 'security', 'cleaning', 'staff', 'repairs', 'contractor', 'management_fee', 'other'] as category}<option
+											value={category}>{category.replaceAll('_', ' ')}</option
+										>{/each}</select
+								></label
+							>
+						</div>
+						<div class="form-grid two">
+							<label
+								>Description<input
+									name="description"
+									required
+									placeholder="City rates — September"
+								/></label
+							><label
+								>Amount<input name="amount" type="number" min="0" step="0.01" required /></label
+							>
+						</div>
+						<div class="form-grid two">
+							<label
+								>Date<input name="expense_date" type="date" value={iso(today)} required /></label
+							><label
+								>Reference<input name="reference" placeholder="Invoice or receipt number" /></label
+							>
+						</div>
+						<button class="primary" type="submit">Record expense <span>→</span></button>
+					</form>
+				</section>
+				<section class="report-card">
+					<div class="card-heading">
+						<div>
+							<p class="eyebrow">Receipts less approved expenses</p>
+							<h3>Recorded receipts and expense position</h3>
+						</div>
+					</div>
+					<div class="finance-lines">
+						<div><span>Collected revenue</span><strong>{money(collected)}</strong></div>
+						<div><span>Operating expenses</span><strong>{money(sum(periodExpenses))}</strong></div>
+						<div><span>Maintenance costs</span><strong>{money(maintenanceCost)}</strong></div>
+						<div class="total-line">
+							<span>Net operating position</span><strong
+								class:positive={collected - sum(periodExpenses) >= 0}
+								>{money(collected - sum(periodExpenses))}</strong
+							>
+						</div>
+					</div>
+					<p class="muted">
+						Maintenance job costs are shown separately and are not added again to approved expense
+						totals. This is not a bank balance.
+					</p>
+				</section>
+			</div>
+			<section class="report-card">
+				<div class="card-heading">
+					<div>
+						<p class="eyebrow">Expense ledger</p>
+						<h3>Recent operating costs</h3>
+					</div>
+				</div>
+				<div class="table-wrap">
+					<table>
+						<thead
+							><tr
+								><th>Date</th><th>Property</th><th>Category</th><th>Description</th><th>Amount</th
+								></tr
+							></thead
+						><tbody
+							>{#each periodExpenses as expense}<tr
+									><td>{dateLabel(expense.expense_date)}</td><td
+										>{propertyName(expense.property_id)}</td
+									><td>{expense.category.replaceAll('_', ' ')}</td><td
+										>{expense.description}<small>{expense.reference ?? ''}</small></td
+									><td>{money(expense.amount)}</td></tr
+								>{:else}<tr><td colspan="5" class="empty">No expenses in this period.</td></tr
+								>{/each}</tbody
+						>
+					</table>
+				</div>
+			</section>
+		{:else if view === 'audit'}
+			<section class="report-card">
+				<div class="card-heading">
+					<div>
+						<p class="eyebrow">Management oversight</p>
+						<h3>Recent audit history</h3>
 						<p class="muted">
-							Rates, insurance, utilities, security, staff and contractor costs roll into net
-							position.
+							Latest 100 workspace events across all periods. Actor IDs identify the account
+							responsible.
 						</p>
 					</div>
 				</div>
-				<form method="POST" action="?/addExpense" class="form-stack">
-					<div class="form-grid two">
-						<label
-							>Property<select name="property_id" required
-								><option value="">Choose property</option>{#each properties as property}<option
-										value={property.id}>{property.name}</option
-									>{/each}</select
-							></label
-						><label
-							>Category<select name="category" required
-								>{#each ['rates', 'insurance', 'utilities', 'security', 'cleaning', 'staff', 'repairs', 'contractor', 'management_fee', 'other'] as category}<option
-										value={category}>{category.replaceAll('_', ' ')}</option
-									>{/each}</select
-							></label
-						>
-					</div>
-					<div class="form-grid two">
-						<label
-							>Description<input
-								name="description"
-								required
-								placeholder="City rates — September"
-							/></label
-						><label>Amount<input name="amount" type="number" min="0" step="0.01" required /></label>
-					</div>
-					<div class="form-grid two">
-						<label>Date<input name="expense_date" type="date" value={iso(today)} required /></label
-						><label
-							>Reference<input name="reference" placeholder="Invoice or receipt number" /></label
-						>
-					</div>
-					<button class="primary" type="submit">Record expense <span>→</span></button>
-				</form>
+				{#if data.auditUnavailable}<p role="status">
+						Audit history could not be loaded. Try refreshing.
+					</p>{:else}<div class="table-wrap">
+						<table>
+							<thead
+								><tr><th>When</th><th>Action / record</th><th>Actor</th><th>Evidence</th></tr
+								></thead
+							><tbody
+								>{#each data.auditEntries ?? [] as event}<tr
+										><td>{event.created_at}</td><td
+											>{event.action.replaceAll('_', ' ')}<small
+												>{event.entity_type} / {event.entity_id ?? 'Workspace'}</small
+											></td
+										><td>{event.actor_user_id ?? 'System automation'}</td><td
+											><details>
+												<summary>View changes</summary>
+												<pre>{JSON.stringify(event.metadata, null, 2)}</pre>
+											</details></td
+										></tr
+									>{:else}<tr><td colspan="4">No events recorded.</td></tr>{/each}</tbody
+							>
+						</table>
+					</div>{/if}
 			</section>
+		{:else}
 			<section class="report-card">
 				<div class="card-heading">
 					<div>
-						<p class="eyebrow">Net operating position</p>
-						<h3>Revenue less property costs</h3>
+						<p class="eyebrow">Operational controls</p>
+						<h3>Data quality alerts</h3>
+						<p class="muted">Resolve these gaps to improve the reliability of your reports.</p>
 					</div>
+					<span class="signal">{dataQuality().length} open checks</span>
 				</div>
-				<div class="finance-lines">
-					<div><span>Collected revenue</span><strong>{money(collected)}</strong></div>
-					<div><span>Operating expenses</span><strong>{money(sum(periodExpenses))}</strong></div>
-					<div><span>Maintenance costs</span><strong>{money(maintenanceCost)}</strong></div>
-					<div class="total-line">
-						<span>Net operating position</span><strong
-							class:positive={collected - sum(periodExpenses) - maintenanceCost >= 0}
-							>{money(collected - sum(periodExpenses) - maintenanceCost)}</strong
-						>
-					</div>
+				<div class="quality-list">
+					{#each dataQuality() as item}<a href={`/workspace/${data.organization.id}/${item.href}`}
+							><span><strong>{item.count}</strong>{item.label}</span><span>Review →</span></a
+						>{:else}<div class="empty">
+							Your core records are complete for the selected checks.
+						</div>{/each}
 				</div>
-				<p class="muted">This is an operating view. It excludes financing, tax and depreciation.</p>
 			</section>
-		</div>
-		<section class="report-card">
-			<div class="card-heading">
-				<div>
-					<p class="eyebrow">Expense ledger</p>
-					<h3>Recent operating costs</h3>
-				</div>
-			</div>
-			<div class="table-wrap">
-				<table>
-					<thead
-						><tr
-							><th>Date</th><th>Property</th><th>Category</th><th>Description</th><th>Amount</th
-							></tr
-						></thead
-					><tbody
-						>{#each periodExpenses as expense}<tr
-								><td>{dateLabel(expense.expense_date)}</td><td
-									>{propertyName(expense.property_id)}</td
-								><td>{expense.category.replaceAll('_', ' ')}</td><td
-									>{expense.description}<small>{expense.reference ?? ''}</small></td
-								><td>{money(expense.amount)}</td></tr
-							>{:else}<tr><td colspan="5" class="empty">No expenses in this period.</td></tr
-							>{/each}</tbody
-					>
-				</table>
-			</div>
-		</section>
-	{:else}
-		<section class="report-card">
-			<div class="card-heading">
-				<div>
-					<p class="eyebrow">Operational controls</p>
-					<h3>Data quality alerts</h3>
-					<p class="muted">Resolve these gaps to improve the reliability of your reports.</p>
-				</div>
-				<span class="signal">{dataQuality().length} open checks</span>
-			</div>
-			<div class="quality-list">
-				{#each dataQuality() as item}<a href={`/workspace/${data.organization.id}/${item.href}`}
-						><span><strong>{item.count}</strong>{item.label}</span><span>Review →</span></a
-					>{:else}<div class="empty">
-						Your core records are complete for the selected checks.
-					</div>{/each}
-			</div>
-		</section>
-	{/if}
+		{/if}
+	{:else}<div class="range-error" role="alert">
+			Choose a valid start and end date. The end date must be on or after the start date.
+		</div>{/if}
 </div>
 
 <style>
@@ -756,9 +843,6 @@
 		margin: 0.15rem 0 0.35rem;
 		font-size: clamp(1.65rem, 3vw, 2.7rem);
 		letter-spacing: -0.06em;
-	}
-	.report-toolbar h2 span {
-		color: #b6d84a;
 	}
 	.muted {
 		color: #6e8790;

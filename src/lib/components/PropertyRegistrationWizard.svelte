@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { enhance } from '$app/forms';
 	import LocationPicker from '$lib/components/LocationPicker.svelte';
 	import PortfolioMap from '$lib/components/PortfolioMap.svelte';
 
@@ -28,14 +29,26 @@
 		floor_label: string | null;
 	};
 
-	let { organization, properties, spaces, form } = $props<{
+	let {
+		organization,
+		properties,
+		spaces,
+		form,
+		creatingOnly = false,
+		onComplete,
+		busy = $bindable(false)
+	} = $props<{
 		organization: { id: string; currency_code: string };
 		properties: Property[];
 		spaces: Space[];
+		creatingOnly?: boolean;
+		onComplete?: () => void;
+		busy?: boolean;
 		form?: { message?: string; success?: boolean; nextStep?: number; propertyId?: string } | null;
 	}>();
 
 	let step = $state(1);
+	let unlockedStep = $state(1);
 	let selectedPropertyId = $state('');
 	let rentalMode = $state('whole_property');
 	let showRoomForm = $state(false);
@@ -62,13 +75,15 @@
 	];
 
 	$effect(() => {
-		if (!selectedPropertyId && properties.length) selectedPropertyId = properties[0].id;
+		if (!creatingOnly && !selectedPropertyId && properties.length)
+			selectedPropertyId = properties[0].id;
 		const selected = properties.find((property: Property) => property.id === selectedPropertyId);
 		if (selected?.rental_mode) rentalMode = selected.rental_mode;
 	});
 	$effect(() => {
 		if (form?.success && form.nextStep) {
 			step = form.nextStep;
+			unlockedStep = Math.max(unlockedStep, form.nextStep);
 			if (form.propertyId) selectedPropertyId = form.propertyId;
 		}
 	});
@@ -93,7 +108,7 @@
 		modes.find((mode) => mode.key === key)?.title ?? 'Not configured';
 </script>
 
-<section class="registration-shell" aria-labelledby="registration-title">
+<section class="registration-shell" aria-busy={busy} aria-labelledby="registration-title">
 	<div class="registration-intro">
 		<div>
 			<p class="eyebrow">Portfolio setup</p>
@@ -110,21 +125,33 @@
 		</div>
 	</div>
 
+	{#if form?.message}<div
+			class="registration-feedback"
+			class:failure={!form.success}
+			role={form.success ? 'status' : 'alert'}
+		>
+			{form.message}
+		</div>{/if}
 	<nav class="steps" aria-label="Property registration steps">
-		<button class:active={step === 1} type="button" onclick={() => (step = 1)}>
+		<button
+			class:active={step === 1}
+			disabled={busy || (creatingOnly && !!selectedProperty)}
+			type="button"
+			onclick={() => (step = 1)}
+		>
 			<span>01</span><strong>Location</strong><small>Address and map pin</small>
 		</button>
 		<button
 			class:active={step === 2}
-			class:disabled={!properties.length}
+			disabled={!selectedProperty || busy}
 			type="button"
-			onclick={() => properties.length && (step = 2)}
+			onclick={() => selectedProperty && (step = 2)}
 		>
 			<span>02</span><strong>Rental model</strong><small>Whole, rooms, or mixed</small>
 		</button>
 		<button
 			class:active={step === 3}
-			class:disabled={!selectedProperty}
+			disabled={!selectedProperty || busy || (creatingOnly && unlockedStep < 3)}
 			type="button"
 			onclick={() => selectedProperty && (step = 3)}
 		>
@@ -132,7 +159,7 @@
 		</button>
 		<button
 			class:active={step === 4}
-			class:disabled={!selectedProperty}
+			disabled={!selectedProperty || !selectedSpaces.length || busy}
 			type="button"
 			onclick={() => selectedProperty && (step = 4)}
 		>
@@ -152,7 +179,21 @@
 						</p>
 					</div>
 				</div>
-				<form method="POST" action="?/addProperty" class="form-stack">
+				<form
+					method="POST"
+					use:enhance={() => {
+						busy = true;
+						return async ({ update }) => {
+							try {
+								await update({ reset: false });
+							} finally {
+								busy = false;
+							}
+						};
+					}}
+					action="?/addProperty"
+					class="form-stack"
+				>
 					<input type="hidden" name="rental_mode" value="whole_property" />
 					<div class="form-grid two">
 						<label
@@ -170,7 +211,9 @@
 						><label>Postal code<input name="postal_code" placeholder="Optional" /></label>
 					</div>
 					<LocationPicker />
-					<button class="primary" type="submit">Save property and continue <span>→</span></button>
+					<button class="primary" type="submit" data-no-feedback="true" disabled={busy}
+						>Save property and continue <span>→</span></button
+					>
 				</form>
 			</section>
 			<aside class="panel guidance-panel">
@@ -210,12 +253,12 @@
 					<h3>How will {selectedProperty?.name ?? 'this property'} be rented?</h3>
 					<p>Choose the model that matches how people pay for and occupy the property.</p>
 				</div>
-				<button class="quiet-button" type="button" onclick={() => (step = 1)}
-					>← Add another property</button
-				>
+				{#if !creatingOnly}<button class="quiet-button" type="button" onclick={() => (step = 1)}
+						>← Add another property</button
+					>{/if}
 			</div>
 			<div class="property-selector" aria-label="Select property">
-				{#each properties as property (property.id)}<button
+				{#each creatingOnly ? properties.filter((property: Property) => property.id === selectedPropertyId) : properties as property (property.id)}<button
 						class:chosen={property.id === selectedPropertyId}
 						type="button"
 						onclick={() => chooseProperty(property.id)}
@@ -239,7 +282,21 @@
 						></button
 					>{/each}
 			</div>
-			<form method="POST" action="?/updatePropertyRentalMode" class="stage-footer">
+			<form
+				method="POST"
+				use:enhance={() => {
+					busy = true;
+					return async ({ update }) => {
+						try {
+							await update({ reset: false });
+						} finally {
+							busy = false;
+						}
+					};
+				}}
+				action="?/updatePropertyRentalMode"
+				class="stage-footer"
+			>
 				<input type="hidden" name="property_id" value={selectedPropertyId} /><input
 					type="hidden"
 					name="rental_mode"
@@ -250,7 +307,7 @@
 						>You can change this later in property settings.</small
 					>
 				</div>
-				<button class="primary" type="submit" onclick={() => (step = 3)}
+				<button class="primary" type="submit" data-no-feedback="true"
 					>Save model and add spaces <span>→</span></button
 				>
 			</form>
@@ -298,7 +355,21 @@
 				>
 			</div>
 			{#if rentalMode === 'room_by_room' || showRoomForm}
-				<form method="POST" action="?/addSpace" class="panel nested-form">
+				<form
+					method="POST"
+					use:enhance={() => {
+						busy = true;
+						return async ({ update }) => {
+							try {
+								await update({ reset: false });
+							} finally {
+								busy = false;
+							}
+						};
+					}}
+					action="?/addSpace"
+					class="panel nested-form"
+				>
 					<input type="hidden" name="property_id" value={selectedPropertyId} /><input
 						type="hidden"
 						name="kind"
@@ -342,12 +413,26 @@
 										>{space.name} · {space.kind}</option
 									>{/each}</select
 							></label
-						>{/if}<button class="primary" type="submit"
+						>{/if}<button class="primary" type="submit" data-no-feedback="true"
 						>Add room to {selectedProperty?.name} <span>＋</span></button
 					>
 				</form>
 			{:else}
-				<form method="POST" action="?/addSpace" class="panel nested-form">
+				<form
+					method="POST"
+					use:enhance={() => {
+						busy = true;
+						return async ({ update }) => {
+							try {
+								await update({ reset: false });
+							} finally {
+								busy = false;
+							}
+						};
+					}}
+					action="?/addSpace"
+					class="panel nested-form"
+				>
 					<input type="hidden" name="property_id" value={selectedPropertyId} /><input
 						type="hidden"
 						name="kind"
@@ -378,7 +463,9 @@
 							/></label
 						><label>Bedrooms<input name="bedrooms" type="number" min="0" placeholder="3" /></label>
 					</div>
-					<button class="primary" type="submit">Add whole-property unit <span>＋</span></button>
+					<button class="primary" type="submit" data-no-feedback="true"
+						>Add whole-property unit <span>＋</span></button
+					>
 				</form>
 			{/if}
 			{#if selectedSpaces.length}<div class="space-list">
@@ -449,6 +536,9 @@
 					>Open people & leases <span>→</span></a
 				>
 			</div>
+			{#if onComplete}<button class="primary" type="button" onclick={onComplete}
+					>Finish and view properties</button
+				>{/if}
 			<p class="review-footnote">
 				You can manage all properties, rooms, leases, collections, and maintenance from the
 				workspace navigation.
@@ -458,6 +548,24 @@
 </section>
 
 <style>
+	.registration-feedback {
+		background: #edf2e3;
+		border: 1px solid #d8e1cb;
+		padding: 13px 16px;
+		border-radius: 6px;
+		color: #5e7549;
+		font-size: 12px;
+	}
+	.registration-feedback.failure {
+		background: #fff0e5;
+		border-color: #e4cfb5;
+		color: #98663b;
+	}
+	.steps button:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
 	.registration-shell {
 		display: grid;
 		gap: 18px;
@@ -558,10 +666,6 @@
 		background: var(--musha-deep);
 		border-color: var(--musha-deep);
 		color: #fff;
-	}
-	.steps button.disabled {
-		cursor: not-allowed;
-		opacity: 0.55;
 	}
 	.steps span {
 		grid-row: span 2;

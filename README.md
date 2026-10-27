@@ -8,6 +8,17 @@ Residential-first property management infrastructure built with SvelteKit and Su
 2. Install dependencies with `npm install`.
 3. Start the development server with `npm run dev`.
 
+On Windows PowerShell, use `npm.cmd` if script execution policy blocks `npm`:
+
+```powershell
+npm.cmd ci --cache .npm-cache
+npm.cmd run dev -- --host 127.0.0.1
+```
+
+Open the local URL printed by Vite (normally `http://127.0.0.1:5173`). Keep the
+terminal open while using the app; press Ctrl+C to stop it. Node.js 24 LTS is
+recommended. The project-local npm cache is ignored by Git.
+
 The service-role key, if needed for server-side administration, must remain server-only and must never use a `PUBLIC_` prefix.
 
 ## Platform administrator bootstrap
@@ -60,3 +71,22 @@ npm run check
 npm run lint
 npm run build
 ```
+
+## Property manager dashboard
+
+The workspace overview uses organization-scoped records and the organization's timezone.
+The financial month selector changes charges, receipts and approved expenses; occupancy,
+maintenance, overdue balances and lease renewals remain current. Receipts are cash recorded
+by payment date. Settlement is the amount allocated to the selected month's issued charges,
+not receipts divided by charges. Draft/void charges and future-dated receipts are excluded.
+Overdue balances are unpaid allocated balances on charges due before today. Occupancy counts
+active terminal spaces in active properties, so a subdivided unit and its rooms are not both
+counted. Expenses use approved expense records, not maintenance estimates.
+
+The public `/demo/dashboard` page uses fictional records dated October 2026 and the same
+snapshot calculations as the live overview. No database migrations are required for this redesign.
+Run the calculation checks with `node --test tests/dashboard.test.mjs`.
+
+## Connected operational workflows
+
+The connected onboarding, payments, maintenance approvals, lease lifecycle, daily actions, and audit controls require the new `20261027130000_connected_workflows.sql` migration. See [activation and acceptance checks](docs/connected-workflows.md) before using these workflows. Run the complete regression suite with `npm.cmd test`.

@@ -1,321 +1,143 @@
-<script lang="ts">
-	import MarketingHeader from '$lib/components/MarketingHeader.svelte';
-	import MarketingFooter from '$lib/components/MarketingFooter.svelte';
-	import { applicationHref } from '$lib/marketing';
+﻿<script lang="ts">
+	import { resolve } from '$app/paths';
+	import MarketingShell from '$lib/components/MarketingShell.svelte';
+	import PropertyPreview from '$lib/components/PropertyPreview.svelte';
 	const models = [
 		[
 			'01',
 			'Residential',
-			'Ready now',
-			'Manage homes, apartments, rooms, tenants, rent and maintenance from one connected workspace.'
+			'Homes, apartments, rooms and the tenancies, collections and care behind them.',
+			'Available today'
 		],
 		[
 			'02',
 			'Commercial',
-			'On the roadmap',
-			'A natural next layer for offices, shops, mixed-use buildings and commercial leases.'
+			'A planned extension for offices, shops, mixed-use buildings and commercial leases.',
+			'On the roadmap'
 		],
 		[
 			'03',
-			'Student accommodation',
-			'On the roadmap',
-			'Purpose-built support for campuses, beds, shared housing and student tenancy operations.'
+			'Student living',
+			'A planned operating model for campuses, beds and shared student accommodation.',
+			'On the roadmap'
 		],
 		[
 			'04',
-			'Short stay & tourism',
-			'Future connection',
-			'A flexible foundation for Airbnb, lodges, guest stays and tourism property operations.'
+			'Short stay',
+			'A future connection for guest stays, lodges and tourism property operations.',
+			'Future connection'
 		]
 	];
 </script>
 
-<svelte:head><title>Platform · Musha PMS</title></svelte:head><MarketingHeader />
-<main>
-	<!-- eslint-disable svelte/no-navigation-without-resolve -->
-	<section class="hero">
-		<p>THE MUSHA PLATFORM</p>
-		<h1>One operating layer<br />for every <em>place you manage.</em></h1>
-		<span
-			>Musha connects the property, people and operational work behind a portfolio—beginning with
-			residential property management, and designed to grow with your business.</span
-		><!-- eslint-disable-next-line svelte/no-navigation-without-resolve --><a
-			href={applicationHref()}>Sign in to Musha →</a
-		>
-	</section>
-	<section class="today">
-		<div>
-			<p>AVAILABLE TODAY</p>
-			<h2>Residential is<br /><em>ready to run.</em></h2>
-			<span
-				>Musha is ready now for residential portfolios: property and unit setup, tenant and lease
-				operations, rent collection, maintenance, documents, reporting and team access.</span
+<svelte:head
+	><title>The platform — Musha PMS</title><meta
+		name="description"
+		content="Explore Musha’s connected residential property management platform, from your portfolio register to collections and maintenance."
+	/></svelte:head
+>
+<MarketingShell
+	><main id="main-content">
+		<section class="editorial-hero">
+			<div>
+				<p class="eyebrow">The Musha platform</p>
+				<h1>Good foundations.<br /><em>For every address.</em></h1>
+				<p class="description">
+					Your portfolio is more than a list of properties. Musha connects the people, agreements
+					and daily work that make each one run well.
+				</p>
+				<a class="button button-green" href={resolve('/demo')}
+					>Explore the workspace <span>↗</span></a
+				>
+			</div>
+			<figure>
+				<img
+					src="/images/musha-architecture.jpg"
+					alt="Contemporary residential architecture surrounded by greenery"
+					width="1400"
+					height="1000"
+				/>
+				<figcaption>BUILT AROUND THE WORK BEHIND THE PROPERTY.</figcaption>
+			</figure>
+		</section>
+		<div class="editorial-band">
+			<span>ONE CONNECTED WORKSPACE</span><span>RESIDENTIAL OPERATIONS, AVAILABLE TODAY</span><span
+				>DESIGNED FOR GROWING TEAMS</span
 			>
 		</div>
-		<div class="ready">
-			<b>Residential operations</b><span>Properties & spaces</span><span>People & leases</span><span
-				>Finance & collections</span
-			><span>Maintenance</span><span>Reports & controls</span>
-		</div>
-	</section>
-	<section class="models">
-		<div class="model-title">
-			<p>BUILT TO GROW WITH YOU</p>
-			<h2>One foundation.<br /><em>More operating models.</em></h2>
-			<span
-				>Your data model and workflow should not need replacing as your business changes shape.</span
-			>
-		</div>
-		<div class="model-list">
-			{#each models as model (model[0])}<article class:active={model[2] === 'Ready now'}>
-					<small>{model[0]}</small>
-					<div><b>{model[1]}</b><span>{model[3]}</span></div>
-					<em>{model[2]}</em>
-				</article>{/each}
-		</div>
-	</section>
-	<section class="why">
-		<article>
-			<i>⌂</i>
-			<h3>Start with the real work</h3>
-			<p>
-				Build the current portfolio properly instead of forcing your team into a generic workflow.
-			</p>
-		</article>
-		<article>
-			<i>↗</i>
-			<h3>Expand without starting over</h3>
-			<p>Add properties, teams and future operating models onto the same trusted foundation.</p>
-		</article>
-		<article>
-			<i>◌</i>
-			<h3>Keep people connected</h3>
-			<p>Give owners, managers, tenants and vendors the right context for each decision.</p>
-		</article>
-	</section>
-	<section class="cta">
-		<div>
-			<p>MAKE YOUR NEXT MOVE CLEAR</p>
-			<h2>Start with<br /><em>residential.</em></h2>
-		</div>
-		<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-		<a href={applicationHref()}>Sign in to Musha →</a>
-	</section>
-</main>
-<MarketingFooter />
-
-<style>
-	:global(body) {
-		margin: 0;
-		background: #fbfaf7;
-		color: #123d35;
-		font-family: var(--font-body);
-	}
-	.hero {
-		padding: 105px clamp(24px, 11vw, 210px) 88px;
-		background:
-			radial-gradient(circle at 83% 20%, #f7d19d, transparent 22%),
-			linear-gradient(135deg, #f2f5ed, #fbf7f0);
-	}
-	.hero p,
-	.today p,
-	.model-title p,
-	.cta p {
-		color: #5c866f;
-		font-size: 10px;
-		font-weight: 800;
-		letter-spacing: 0.17em;
-	}
-	.hero h1,
-	.today h2,
-	.model-title h2,
-	.cta h2 {
-		margin: 20px 0;
-		font-size: clamp(49px, 6.7vw, 91px);
-		line-height: 0.88;
-		letter-spacing: -0.09em;
-	}
-	em {
-		color: #27846a;
-		font-style: normal;
-	}
-	.hero > span,
-	.today > div > span,
-	.model-title > span {
-		display: block;
-		max-width: 570px;
-		color: #6c8178;
-		font-size: 16px;
-		line-height: 1.7;
-	}
-	.hero a,
-	.cta a {
-		display: inline-block;
-		margin-top: 30px;
-		padding: 14px 17px;
-		border-radius: 8px;
-		background: #0d5548;
-		color: #fff;
-		font-size: 13px;
-		font-weight: 700;
-		text-decoration: none;
-	}
-	.today {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 100px;
-		align-items: center;
-		padding: 100px clamp(24px, 11vw, 210px);
-	}
-	.today h2,
-	.model-title h2 {
-		font-size: clamp(41px, 5vw, 67px);
-	}
-	.ready {
-		display: grid;
-		gap: 7px;
-		padding: 26px;
-		border-radius: 14px;
-		background: #e3f0d6;
-	}
-	.ready b {
-		margin-bottom: 9px;
-		color: #3a6956;
-		font-size: 19px;
-	}
-	.ready span {
-		padding: 10px;
-		border: 1px solid #c5ddba;
-		border-radius: 7px;
-		background: #f8fcf3;
-		color: #527562;
-		font-size: 11px;
-	}
-	.models {
-		display: grid;
-		grid-template-columns: 0.8fr 1.2fr;
-		gap: clamp(42px, 9vw, 145px);
-		padding: 100px clamp(24px, 11vw, 210px);
-		background: #eff4e8;
-	}
-	.model-list {
-		display: grid;
-		gap: 7px;
-	}
-	.model-list article {
-		display: grid;
-		grid-template-columns: 35px 1fr auto;
-		gap: 12px;
-		align-items: center;
-		padding: 15px;
-		border: 1px solid #cbddc8;
-		border-radius: 9px;
-		color: #6e897b;
-	}
-	.model-list article.active {
-		border-color: #fff;
-		background: #fff;
-		box-shadow: 0 12px 25px #36624410;
-	}
-	.model-list small {
-		font-size: 10px;
-	}
-	.model-list b,
-	.model-list span {
-		display: block;
-	}
-	.model-list b {
-		color: #3b6655;
-		font-size: 14px;
-	}
-	.model-list span {
-		margin-top: 4px;
-		font-size: 10px;
-		line-height: 1.45;
-	}
-	.model-list em {
-		padding: 5px 7px;
-		border-radius: 99px;
-		background: #dcefd3;
-		color: #4e8260;
-		font-size: 9px;
-	}
-	.why {
-		display: grid;
-		grid-template-columns: repeat(3, 1fr);
-		gap: 10px;
-		padding: 100px clamp(24px, 7vw, 106px);
-	}
-	.why article {
-		min-height: 240px;
-		padding: 22px;
-		border-radius: 12px;
-		background: #e7f0e0;
-	}
-	.why article:nth-child(2) {
-		background: #f2d9bd;
-	}
-	.why article:nth-child(3) {
-		background: #dceae2;
-	}
-	.why i {
-		display: grid;
-		place-items: center;
-		width: 40px;
-		height: 40px;
-		border-radius: 10px;
-		background: #fff9;
-		color: #477b60;
-		font-size: 20px;
-		font-style: normal;
-	}
-	.why h3 {
-		margin: 40px 0 9px;
-		font-size: 23px;
-		letter-spacing: -0.06em;
-	}
-	.why p {
-		color: #6e8479;
-		font-size: 13px;
-		line-height: 1.65;
-	}
-	.cta {
-		display: flex;
-		align-items: end;
-		justify-content: space-between;
-		padding: 92px clamp(24px, 11vw, 210px);
-		background: #104e44;
-	}
-	.cta h2 {
-		color: #fff;
-		font-size: clamp(43px, 5vw, 70px);
-	}
-	.cta a {
-		margin: 0;
-		background: #a9dc72;
-		color: #174b40;
-	}
-	@media (max-width: 700px) {
-		.hero {
-			padding-left: 24px;
-			padding-right: 24px;
-		}
-		.today,
-		.models {
-			grid-template-columns: 1fr;
-			gap: 50px;
-			padding: 70px 24px;
-		}
-		.why {
-			grid-template-columns: 1fr;
-			padding: 70px 20px;
-		}
-		.cta {
-			display: block;
-			padding: 70px 24px;
-		}
-		.cta a {
-			margin-top: 23px;
-		}
-	}
-</style>
+		<section class="section two-column" data-reveal>
+			<div>
+				<p class="eyebrow">The daily essentials</p>
+				<h2>A place for the work.<br /><em>Space for perspective.</em></h2>
+				<p>
+					Keep your portfolio register, people, leases, rent and maintenance together. Give your
+					team a reliable starting point for each working day.
+				</p>
+				<a class="text-link" href={resolve('/solutions')}>See the workspaces <span>↗</span></a>
+			</div>
+			<PropertyPreview />
+		</section>
+		<section class="section" data-reveal>
+			<p class="eyebrow">Your portfolio, your pace</p>
+			<h2>Start with residential.<br /><em>Leave room for what’s next.</em></h2>
+			<div class="model-table">
+				{#each models as model (model[0])}<article class="model-row">
+						<span>{model[0]}</span>
+						<h3>{model[1]}</h3>
+						<p>{model[2]}</p>
+						<span class="status" class:available={model[0] === '01'}>{model[3]}</span>
+					</article>{/each}
+			</div>
+		</section>
+		<section class="dark-section">
+			<div class="section two-column" data-reveal>
+				<div>
+					<p class="eyebrow">Considered from the start</p>
+					<h2>Your team.<br /><em>The right context.</em></h2>
+					<p>
+						A connected system works best when everyone knows where they belong. Musha organizes
+						access and work around your organization.
+					</p>
+				</div>
+				<div class="numbered-list">
+					<article>
+						<span>01</span>
+						<div>
+							<h3>Work with clear roles</h3>
+							<p>Bring people into your team with role-aware access to the operations they need.</p>
+						</div>
+					</article>
+					<article>
+						<span>02</span>
+						<div>
+							<h3>Keep the record together</h3>
+							<p>
+								Connect documents, payments and maintenance requests to the right people and spaces.
+							</p>
+						</div>
+					</article>
+					<article>
+						<span>03</span>
+						<div>
+							<h3>Make the next decision easier</h3>
+							<p>
+								Use occupancy, collections and operating reports to understand where attention is
+								needed.
+							</p>
+						</div>
+					</article>
+				</div>
+			</div>
+		</section>
+		<section class="section closing-cta" data-reveal>
+			<p class="eyebrow">See how it fits</p>
+			<h2>A better foundation<br /><em>for your portfolio.</em></h2>
+			<div>
+				<p>Tell us how you manage today.<br />We’ll help you find your starting point.</p>
+				<a class="button button-green" href={resolve('/contact')}
+					>Talk to the Musha team <span>↗</span></a
+				>
+			</div>
+		</section>
+	</main></MarketingShell
+>

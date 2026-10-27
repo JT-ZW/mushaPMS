@@ -3,6 +3,11 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+	// Leaflet is loaded dynamically by the map views. Prebundle it before the
+	// browser connects so opening a map does not replace an active dependency bundle.
+	optimizeDeps: {
+		include: ['leaflet']
+	},
 	plugins: [
 		sveltekit({
 			compilerOptions: {

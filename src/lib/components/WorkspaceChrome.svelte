@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import WorkspaceNotifications from './WorkspaceNotifications.svelte';
+	let menuOpen = $state(false);
 
 	type Organization = { id: string; name: string; status: string; currency_code: string };
 	type Module = { module_key: 'residential' | 'commercial' | 'student' | 'short_stay' };
@@ -25,7 +27,6 @@
 	const nav = [
 		{ key: 'overview', label: 'Overview', suffix: '' },
 		{ key: 'properties', label: 'Properties', suffix: '/properties' },
-		{ key: 'new-property', label: 'Add property', suffix: '/new-property' },
 		{ key: 'people', label: 'People & leases', suffix: '/people' },
 		{ key: 'finance', label: 'Finance & collections', suffix: '/finance' },
 		{ key: 'maintenance', label: 'Maintenance', suffix: '/maintenance' },
@@ -38,21 +39,31 @@
 </script>
 
 <div class="workspace-shell">
-	<aside class="workspace-sidebar">
+	<aside class="workspace-sidebar" class:menu-open={menuOpen}>
 		<a class="workspace-brand" href={resolve(`/workspace/${organization.id}`)}>
 			<img class="musha-logo" src="/logo.png" alt="Musha" />
-			<span><strong>Musha</strong><small>Client workspace</small></span>
+			<span><small>PROPERTY MANAGEMENT</small></span>
 		</a>
 		<div class="workspace-name">
 			<strong>{organization.name}</strong><small>{organization.currency_code} · {role}</small>
 		</div>
+		<button
+			type="button"
+			class="mobile-menu"
+			aria-controls="workspace-navigation"
+			aria-expanded={menuOpen}
+			onclick={() => (menuOpen = !menuOpen)}
+			>{menuOpen ? 'Close menu ?' : 'Workspace menu +'}</button
+		>
 		<p class="nav-label">Workspace</p>
-		<nav>
+		<nav id="workspace-navigation" aria-label="Workspace navigation">
 			{#each nav as item (item.key)}
 				<a
 					class:active={active === item.key ||
 						(item.key === 'people' &&
 							['tenants', 'new-tenant', 'leases', 'documents', 'move-outs'].includes(active))}
+					aria-current={active === item.key ? 'page' : undefined}
+					onclick={() => (menuOpen = false)}
 					href={resolve(`/workspace/${organization.id}${item.suffix}`)}>{item.label}</a
 				>
 			{/each}
@@ -80,223 +91,257 @@
 				>
 			</div>
 		{/if}
+		<div class="workspace-notification-bar">
+			<WorkspaceNotifications organizationId={organization.id} />
+		</div>
 		<div class="workspace-content">{@render children()}</div>
 	</main>
 </div>
 
 <style>
-	.workspace-shell {
-		min-height: 100vh;
+	.workspace-notification-bar {
 		display: flex;
-		background: #f7f8f5;
-		color: var(--musha-ink);
+		justify-content: flex-end;
+		max-width: 1500px;
+		margin: 0 auto 12px;
+	}
+	.workspace-shell {
+		min-height: 100svh;
+		display: flex;
+		background: #f2f4ec;
+		color: #263f33;
+	}
+	.workspace-shell * {
+		box-sizing: border-box;
 	}
 	.workspace-sidebar {
 		position: sticky;
 		top: 0;
-		width: 246px;
-		height: 100vh;
-		flex: 0 0 246px;
-		padding: 25px 16px 19px;
-		background: var(--musha-ink);
-		color: #d6e9de;
+		width: 215px;
+		flex: 0 0 215px;
+		height: 100svh;
+		overflow-y: auto;
+		padding: 24px 17px;
+		background: #edf0e5;
+		border-right: 1px solid #dce3d0;
+		scrollbar-width: thin;
 	}
 	.workspace-brand {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 0 8px 23px;
-		color: #fff;
+		display: grid;
+		justify-items: center;
 		text-decoration: none;
+		padding-bottom: 22px;
+		color: #587047;
 	}
 	.workspace-brand .musha-logo {
-		width: 54px;
-		height: 54px;
-		flex-basis: 54px;
-		border-radius: 15px;
-	}
-	.workspace-brand strong,
-	.workspace-brand small,
-	.workspace-name strong,
-	.workspace-name small {
-		display: block;
-	}
-	.workspace-brand strong {
-		font-size: 20px;
-		letter-spacing: -0.05em;
+		width: 100px;
+		height: 100px;
+		flex-basis: 100px;
+		border-radius: 4px;
+		border: 1px solid #e0e4d6;
+		box-shadow: none;
+		background: white;
 	}
 	.workspace-brand small {
-		color: #9cc4a9;
-		font-size: 10px;
-		letter-spacing: 0.1em;
-		margin-top: 3px;
-		text-transform: uppercase;
+		font-size: 7px;
+		letter-spacing: 1.5px;
+		display: block;
+		margin-top: 12px;
 	}
 	.workspace-name {
-		padding: 15px 10px;
-		border-top: 1px solid #2a5a4c;
-		border-bottom: 1px solid #2a5a4c;
+		padding: 18px 10px;
+		border-top: 1px solid #d5ddc9;
+		border-bottom: 1px solid #d5ddc9;
 	}
 	.workspace-name strong {
-		color: #fff;
-		font-size: 13px;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		font-size: 12px;
+		line-height: 1.6;
+		display: block;
+		overflow-wrap: anywhere;
+		font-weight: 600;
 	}
 	.workspace-name small {
-		color: #8fb8a1;
-		font-size: 10px;
-		margin-top: 4px;
+		font-size: 9px;
+		color: #8a977b;
+		display: block;
 		text-transform: capitalize;
+		margin-top: 4px;
 	}
 	.nav-label {
-		color: #6d9987;
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.16em;
-		margin: 25px 12px 9px;
+		font-size: 8px;
+		color: #8c9a7a;
+		letter-spacing: 1.7px;
+		margin: 25px 12px 13px;
 		text-transform: uppercase;
 	}
-	nav {
+	.workspace-sidebar nav {
 		display: grid;
-		gap: 3px;
+		gap: 4px;
 	}
-	nav a {
+	.workspace-sidebar nav a {
+		font-size: 11px;
+		padding: 12px 13px;
 		border-radius: 7px;
-		color: #a5c5b3;
-		font-size: 13px;
-		padding: 10px 12px;
+		color: #6f805f;
 		text-decoration: none;
+		border: 1px solid transparent;
+		transition: background 0.2s;
 	}
-	nav a:hover,
-	nav a.active {
-		background: #235447;
-		color: #fff;
+	.workspace-sidebar nav a:hover {
+		background: #e3e9d8;
+		color: #304d2a;
+	}
+	.workspace-sidebar nav a.active {
+		background: #fffefa;
+		border-color: #dce3cf;
+		color: #2f4c2c;
+		box-shadow: 0 3px 8px #44503905;
 	}
 	.module-access {
-		display: grid;
-		gap: 6px;
 		margin: 25px 10px 0;
-		padding-top: 18px;
-		border-top: 1px solid #2a5a4c;
+		padding-top: 20px;
+		border-top: 1px solid #d5ddc9;
+		display: grid;
+		gap: 8px;
 	}
 	.module-access p {
-		color: #6d9987;
-		font-size: 10px;
-		font-weight: 700;
-		letter-spacing: 0.12em;
-		margin: 0 0 3px;
+		font-size: 8px;
+		color: #8c9a7b;
+		letter-spacing: 1.3px;
 		text-transform: uppercase;
+		margin: 0 0 4px;
 	}
-	.module-access span {
-		color: #a5c5b3;
-		font-size: 11px;
+	.module-access > span {
+		font-size: 9px;
+		color: #82936f;
 	}
 	.workspace-sidebar form {
-		margin-top: 20px;
+		margin-top: 25px;
 	}
-	.workspace-sidebar button {
-		width: 100%;
-		border: 1px solid #39705d;
-		border-radius: 7px;
+	.workspace-sidebar form button {
+		border: 1px solid #d3dcc5;
 		background: transparent;
-		color: #d6e9de;
-		padding: 9px 11px;
+		color: #637b50;
+		border-radius: 6px;
+		width: 100%;
+		padding: 11px;
 		font: inherit;
-		font-size: 12px;
+		font-size: 10px;
 		cursor: pointer;
 	}
 	.workspace-main {
-		min-width: 0;
 		flex: 1;
-		padding: 42px clamp(24px, 5vw, 72px) 64px;
+		min-width: 0;
+		padding: 35px clamp(20px, 3vw, 48px) 50px;
 	}
 	.workspace-content {
-		width: min(100%, 1280px);
-		margin: 0 auto;
+		width: min(100%, 1500px);
+		margin: auto;
 	}
 	.support-banner {
-		width: min(100%, 1280px);
-		margin: 0 auto 18px;
-		padding: 11px 14px;
-		border: 1px solid #d6c06b;
-		border-radius: 10px;
-		background: #fff8d9;
-		color: #5f5522;
+		max-width: 1500px;
+		margin: 0 auto 20px;
+		padding: 14px 18px;
+		border: 1px solid #dfc887;
+		background: #fff8e6;
 		display: flex;
+		flex-wrap: wrap;
 		gap: 10px;
-		align-items: baseline;
-		font-size: 13px;
+		border-radius: 7px;
+		font-size: 12px;
+		color: #866b30;
 	}
 	.support-banner span {
-		opacity: 0.82;
+		opacity: 0.8;
+	}
+	.mobile-menu {
+		display: none;
+	}
+	a:focus-visible,
+	button:focus-visible {
+		outline: 2px solid #8b9f6e;
+		outline-offset: 3px;
 	}
 	@media (max-width: 760px) {
 		.workspace-shell {
 			display: block;
 		}
-		.support-banner {
-			display: block;
-		}
-		.support-banner span {
-			display: block;
-			margin-top: 4px;
-		}
-	}
-	@media (max-width: 760px) {
-		.workspace-main {
-			padding: 26px 16px 42px;
-		}
 		.workspace-sidebar {
+			position: relative;
 			width: 100%;
 			height: auto;
-			padding: 10px 16px 0;
+			display: flex;
+			align-items: center;
+			flex-wrap: wrap;
+			gap: 10px 18px;
+			padding: 12px 5%;
+			border-right: 0;
+			border-bottom: 1px solid #dce3cf;
 		}
 		.workspace-brand {
-			display: none;
+			padding: 0;
 		}
 		.workspace-brand .musha-logo {
-			width: 48px;
-			height: 48px;
-			flex-basis: 48px;
+			width: 65px;
+			height: 65px;
+			flex-basis: 65px;
 		}
-		.workspace-brand span,
-		.workspace-name,
-		.nav-label,
-		.module-access,
-		.workspace-sidebar button {
+		.workspace-brand > span {
 			display: none;
 		}
-		nav a {
-			padding: 13px 0;
-			text-align: center;
-			font-size: 0;
+		.workspace-name {
+			padding: 0;
+			border: 0;
+			flex: 1;
+			min-width: 0;
 		}
-		nav a::before {
-			content: '•';
-			color: #8fca4d;
-			font-size: 19px;
-		}
-	}
-	@media (max-width: 760px) {
-		.workspace-sidebar nav {
-			display: flex;
-			overflow-x: auto;
-			gap: 5px;
-			padding-bottom: 10px;
-			scrollbar-width: none;
-		}
-		.workspace-sidebar nav::-webkit-scrollbar {
-			display: none;
-		}
-		.workspace-sidebar nav a {
-			white-space: nowrap;
-			padding: 10px 12px;
+		.workspace-name strong {
 			font-size: 12px;
 		}
-		.workspace-sidebar nav a::before {
+		.workspace-name small {
+			font-size: 8px;
+		}
+		.mobile-menu {
+			display: block;
+			padding: 10px 9px;
+			border: 1px solid #ced8c1;
+			border-radius: 5px;
+			background: transparent;
+			color: #607a4c;
+			font: inherit;
+			font-size: 9px;
+		}
+		.workspace-sidebar nav,
+		.nav-label,
+		.module-access,
+		.workspace-sidebar form {
 			display: none;
+		}
+		.workspace-sidebar.menu-open nav {
+			display: grid;
+			width: 100%;
+			grid-template-columns: 1fr 1fr;
+			padding-top: 10px;
+			border-top: 1px solid #d5ddc9;
+		}
+		.workspace-sidebar.menu-open form {
+			display: block;
+			width: 100%;
+			margin: 0;
+		}
+		.workspace-main {
+			padding: 25px 5% 40px;
+		}
+		.workspace-sidebar nav a {
+			font-size: 10px;
+		}
+		.support-banner {
+			font-size: 11px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.workspace-sidebar nav a {
+			transition: none;
 		}
 	}
 </style>

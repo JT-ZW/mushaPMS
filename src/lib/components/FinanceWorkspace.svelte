@@ -1,5 +1,10 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { submissionKey } from '$lib/forms/submission-key';
+	import { enhance } from '$app/forms';
+	import { workspaceSubmit } from '$lib/forms/workspace-submit';
+	import { organizationDate, shiftMonth } from '$lib/dashboard/snapshot';
+	import { chargeBalance, monetary } from '$lib/dashboard/operations';
 	import MushaDatePicker from '$lib/components/MushaDatePicker.svelte';
 
 	type Property = { id: string; name: string; city: string | null; country: string | null };
@@ -71,7 +76,7 @@
 		created_at: string;
 	};
 	type FinanceData = {
-		organization: { id: string; name: string; currency_code: string };
+		organization: { id: string; name: string; currency_code: string; timezone?: string };
 		properties: Property[];
 		spaces: Space[];
 		people: Person[];
@@ -91,7 +96,68 @@
 	let tab = $state('overview');
 	let dueProperty = $state('');
 	let dueStatus = $state('open');
-	const today = new Date().toISOString().slice(0, 10);
+	const today = $derived(
+		organizationDate(new Date(), data.organization.timezone || 'Africa/Harare')
+	);
+	let search = $state('');
+	let propertyFilter = $state('');
+	let period = $state('all');
+	let paymentTenancy = $state('');
+	const inPeriod = (date: string) =>
+		period === 'all' ||
+		(period === 'month'
+			? date.startsWith(today.slice(0, 7))
+			: period === 'last-month'
+				? date.startsWith(shiftMonth(today.slice(0, 7), -1))
+				: date >=
+						new Date(Date.parse(today + 'T00:00:00Z') - 90 * 86400000).toISOString().slice(0, 10) &&
+					date <= today);
+	const propertyForTenancy = (id: string | null) =>
+		data.spaces.find(
+			(space) => space.id === data.tenancies.find((lease) => lease.id === id)?.space_id
+		)?.property_id;
+	const matches = (text: string) => text.toLowerCase().includes(search.toLowerCase());
+	const filteredCharges = $derived(
+		data.charges.filter(
+			(charge) =>
+				inPeriod(charge.due_on) &&
+				(!propertyFilter || propertyForTenancy(charge.tenancy_id) === propertyFilter) &&
+				matches(charge.description + ' ' + tenantName(charge.tenancy_id))
+		)
+	);
+	const filteredPayments = $derived(
+		data.payments.filter(
+			(payment) =>
+				payment.payment_date <= today &&
+				inPeriod(payment.payment_date) &&
+				(!propertyFilter || propertyForTenancy(payment.tenancy_id) === propertyFilter) &&
+				matches(
+					[
+						payment.reference,
+						personName(payment.payer_person_id),
+						payment.tenancy_id ? tenantName(payment.tenancy_id) : ''
+					].join(' ')
+				)
+		)
+	);
+	const filteredExpenses = $derived(
+		data.propertyExpenses.filter(
+			(expense) =>
+				expense.expense_date <= today &&
+				inPeriod(expense.expense_date) &&
+				(!propertyFilter || expense.property_id === propertyFilter) &&
+				matches(expense.description + ' ' + expense.category)
+		)
+	);
+	const approvedExpenses = $derived(
+		filteredExpenses.filter((expense) => expense.approval_status === 'approved')
+	);
+	const resetFilters = () => {
+		search = '';
+		propertyFilter = '';
+		period = 'all';
+	};
+
 	const tabs = [
 		{ key: 'overview', label: 'Overview' },
 		{ key: 'rent-due', label: 'Rent due' },
@@ -105,7 +171,7 @@
 			style: 'currency',
 			currency: data.organization.currency_code
 		}).format(Number(amount ?? 0));
-	const amount = (value: number | string | null | undefined) => Number(value ?? 0);
+	const amount = monetary;
 	const personName = (id: string | null | undefined) => {
 		const person = data.people.find((item) => item.id === id);
 		return person ? `${person.first_name} ${person.last_name}` : 'Unlinked payer';
@@ -120,31 +186,42 @@
 		data.properties.find((property) => property.id === id)?.name ?? 'Property not found';
 	const allocatedForCharge = (id: string) =>
 		data.paymentAllocations
-			.filter((item) => item.charge_id === id)
+			.filter(
+				(item) =>
+					item.charge_id === id &&
+					data.payments.some(
+						(payment) => payment.id === item.payment_id && payment.payment_date <= today
+					)
+			)
 			.reduce((sum, item) => sum + amount(item.amount), 0);
 	const outstandingForCharge = (charge: Charge) =>
-		Math.max(0, amount(charge.amount) - allocatedForCharge(charge.id));
+		chargeBalance(charge, data.paymentAllocations, data.payments, today);
 	const allocatedForPayment = (id: string) =>
-		data.paymentAllocations
-			.filter((item) => item.payment_id === id)
-			.reduce((sum, item) => sum + amount(item.amount), 0);
+		monetary(
+			data.paymentAllocations
+				.filter((item) => item.payment_id === id)
+				.reduce((sum, item) => sum + amount(item.amount), 0)
+		);
 	const statusForCharge = (charge: Charge) => {
 		const outstanding = outstandingForCharge(charge);
 		if (charge.status === 'draft' || charge.status === 'void') return charge.status;
 		if (outstanding <= 0) return 'paid';
-		if (allocatedForCharge(charge.id) > 0) return 'partially_paid';
 		if (charge.due_on < today) return 'overdue';
+		if (allocatedForCharge(charge.id) > 0) return 'partially_paid';
 		return 'issued';
 	};
 	const ledgerCharges = $derived(
-		data.charges.filter((charge) => statusForCharge(charge) !== 'void')
+		filteredCharges.filter((charge) => statusForCharge(charge) !== 'void')
 	);
 	const activeCharges = $derived(
 		ledgerCharges.filter((charge) => statusForCharge(charge) !== 'draft')
 	);
 	const billed = $derived(activeCharges.reduce((sum, charge) => sum + amount(charge.amount), 0));
 	const allocatedCollected = $derived(
-		data.paymentAllocations.reduce((sum, allocation) => sum + amount(allocation.amount), 0)
+		activeCharges.reduce(
+			(sum, charge) => sum + Math.min(amount(charge.amount), allocatedForCharge(charge.id)),
+			0
+		)
 	);
 	const outstanding = $derived(
 		activeCharges.reduce((sum, charge) => sum + outstandingForCharge(charge), 0)
@@ -155,18 +232,20 @@
 			.reduce((sum, charge) => sum + outstandingForCharge(charge), 0)
 	);
 	const unallocated = $derived(
-		data.payments.reduce(
+		filteredPayments.reduce(
 			(sum, payment) => sum + Math.max(0, amount(payment.amount) - allocatedForPayment(payment.id)),
 			0
 		)
 	);
 	const expensesTotal = $derived(
-		data.propertyExpenses
-			.filter((expense) => expense.approval_status !== 'rejected')
-			.reduce((sum, expense) => sum + amount(expense.amount), 0)
+		approvedExpenses.reduce((sum, expense) => sum + amount(expense.amount), 0)
 	);
-	const collectionRate = $derived(billed ? Math.round((allocatedCollected / billed) * 100) : 0);
-	const netPosition = $derived(allocatedCollected - expensesTotal);
+	const collectionRate = $derived(
+		billed ? Math.min(100, Math.round((allocatedCollected / billed) * 100)) : null
+	);
+	const cashReceived = $derived(
+		filteredPayments.reduce((total, payment) => total + amount(payment.amount), 0)
+	);
 	const arrears = $derived(
 		data.tenancies
 			.map((tenancy) => ({
@@ -180,9 +259,12 @@
 			.sort((a, b) => b.balance - a.balance)
 	);
 	const categoryTotal = (category: string) =>
-		data.propertyExpenses
-			.filter((expense) => expense.approval_status !== 'rejected' && expense.category === category)
+		approvedExpenses
+			.filter((expense) => expense.category === category)
 			.reduce((sum, expense) => sum + amount(expense.amount), 0);
+	const allIssuedCharges = $derived(
+		data.charges.filter((charge) => !['draft', 'void'].includes(charge.status ?? 'issued'))
+	);
 	const categoryLabels: Record<string, string> = {
 		rates: 'Rates and taxes',
 		insurance: 'Insurance',
@@ -202,7 +284,7 @@
 	<div class="finance-intro">
 		<div>
 			<p class="eyebrow">Money desk</p>
-			<h2 id="finance-title">Know what is due, received, and spent<span>.</span></h2>
+			<h2 id="finance-title">Clear numbers. <em>Confident decisions.</em></h2>
 			<p>
 				Keep every charge, payment, utility bill, and property expense connected to the place and
 				person it belongs to.
@@ -212,14 +294,49 @@
 			>Open financial reports →</a
 		>
 	</div>
-	<div class="finance-tabs" role="tablist" aria-label="Finance sections">
+	<div class="finance-tabs" aria-label="Finance sections">
 		{#each tabs as item (item.key)}<button
 				class:active={tab === item.key}
 				type="button"
-				role="tab"
-				aria-selected={tab === item.key}
+				aria-pressed={tab === item.key}
 				onclick={() => (tab = item.key)}>{item.label}</button
 			>{/each}
+	</div>
+
+	<div class="operations-filter">
+		<label class="wide-search"
+			><span>Search financial records</span><input
+				type="search"
+				bind:value={search}
+				placeholder="Tenant, description or receipt reference"
+			/></label
+		><label
+			><span>Property</span><select bind:value={propertyFilter}
+				><option value="">All properties</option
+				>{#each data.properties as property (property.id)}<option value={property.id}
+						>{property.name}</option
+					>{/each}</select
+			></label
+		><label
+			><span>Period</span><select bind:value={period}
+				><option value="all">All recorded dates</option><option value="month">This month</option
+				><option value="last-month">Last month</option><option value="90">Last 90 days</option
+				></select
+			></label
+		><button type="button" onclick={resetFilters}>Reset</button>
+	</div>
+	<p class="operations-scope">
+		Filters apply to summaries and charge, receipt and expense registers. Allocation options retain
+		the full ledger. Amounts in {data.organization.currency_code}.
+	</p>
+	<div class="finance-actions">
+		<button type="button" class="primary" onclick={() => (tab = 'payments')}
+			>+ Record payment</button
+		><button type="button" class="secondary" onclick={() => (tab = 'charges')}
+			>+ Create charge</button
+		><button type="button" class="secondary" onclick={() => (tab = 'expenses')}
+			>+ Record expense</button
+		>
 	</div>
 
 	{#if tab === 'overview'}
@@ -230,8 +347,10 @@
 				>
 			</div>
 			<div class="metric">
-				<span>Allocated collected</span><strong>{money(allocatedCollected)}</strong><small
-					>{collectionRate}% collection rate</small
+				<span>Allocated to charges</span><strong>{money(allocatedCollected)}</strong><small
+					>{collectionRate === null
+						? 'No issued charges'
+						: `${collectionRate}% of charges settled`}</small
 				>
 			</div>
 			<div class:attention={outstanding > 0} class="metric">
@@ -245,13 +364,13 @@
 				>
 			</div>
 			<div class="metric">
-				<span>Property expenses</span><strong>{money(expensesTotal)}</strong><small
-					>{data.propertyExpenses.length} operating costs</small
+				<span>Approved expenses</span><strong>{money(expensesTotal)}</strong><small
+					>{approvedExpenses.length} approved expense records</small
 				>
 			</div>
 			<div class="metric">
-				<span>Net cash position</span><strong>{money(netPosition)}</strong><small
-					>Collected less expenses</small
+				<span>Cash received</span><strong>{money(cashReceived)}</strong><small
+					>Receipts by payment date</small
 				>
 			</div>
 		</div>
@@ -261,7 +380,7 @@
 					<div>
 						<p class="eyebrow">Collection health</p>
 						<h3>Money that needs attention</h3>
-						<p>Start with the oldest balances, then clear any unallocated receipts.</p>
+						<p>Start with the largest balances, then clear any unallocated receipts.</p>
 					</div>
 				</div>
 				{#if arrears.length === 0 && !unallocated}<div class="empty">
@@ -299,7 +418,7 @@
 						<p>Track the cost of keeping each property running.</p>
 					</div>
 				</div>
-				{#if data.propertyExpenses.length === 0}<div class="empty">
+				{#if approvedExpenses.length === 0}<div class="empty">
 						<strong>No expenses recorded.</strong>
 						<p>Add rates, utilities, repairs, or other operating costs.</p>
 					</div>{:else}<div class="category-list">
@@ -309,8 +428,7 @@
 							.slice(0, 6) as category (category)}<div>
 								<span
 									><strong>{categoryLabels[category]}</strong><small
-										>{data.propertyExpenses.filter((expense) => expense.category === category)
-											.length} records</small
+										>{approvedExpenses.filter((expense) => expense.category === category).length} records</small
 									></span
 								><b>{money(categoryTotal(category))}</b>
 							</div>{/each}
@@ -318,7 +436,78 @@
 			</section>
 		</div>
 	{:else if tab === 'rent-due'}
-		<section class="panel"><div class="panel-heading"><div><p class="eyebrow">Rent calendar</p><h3>Rent due register</h3><p>Track due rent by tenant, property, rented space, amount, and date. Use the payment desk to record receipts and generate receipts.</p></div></div><div class="due-filters"><select bind:value={dueProperty}><option value="">All properties</option>{#each data.properties as property (property.id)}<option value={property.id}>{property.name}</option>{/each}</select><select bind:value={dueStatus}><option value="open">Open balances</option><option value="all">All statuses</option><option value="overdue">Overdue</option><option value="issued">Upcoming</option><option value="paid">Paid</option></select></div><div class="due-table-wrap"><table class="due-table"><thead><tr><th>Tenant</th><th>Property</th><th>Rented space</th><th>Amount due</th><th>Due date</th><th>Status</th><th></th></tr></thead><tbody>{#each activeCharges.filter((charge) => charge.charge_type === 'rent' && (!dueProperty || data.spaces.find((space) => space.id === data.tenancies.find((tenancy) => tenancy.id === charge.tenancy_id)?.space_id)?.property_id === dueProperty) && (dueStatus === 'all' || (dueStatus === 'open' ? !['paid', 'draft'].includes(statusForCharge(charge)) : statusForCharge(charge) === dueStatus)) ) as charge (charge.id)}{@const tenancy = data.tenancies.find((item) => item.id === charge.tenancy_id)}{@const space = data.spaces.find((item) => item.id === tenancy?.space_id)}<tr><td>{tenantName(charge.tenancy_id)}</td><td>{space ? propertyName(space.property_id) : '—'}</td><td>{space?.name ?? '—'}</td><td><strong>{money(outstandingForCharge(charge))}</strong></td><td>{charge.due_on}</td><td><span class={`charge-status ${statusForCharge(charge)}`}>{statusForCharge(charge).replaceAll('_',' ')}</span></td><td><button class="table-action" type="button" onclick={() => (tab = 'payments')}>Record payment →</button></td></tr>{:else}<tr><td colspan="7">No rent charges match the selected filters.</td></tr>{/each}</tbody></table></div></section>
+		<section class="panel">
+			<div class="panel-heading">
+				<div>
+					<p class="eyebrow">Rent calendar</p>
+					<h3>Rent due register</h3>
+					<p>
+						Track due rent by tenant, property, rented space, amount, and date. Use the payment desk
+						to record receipts and generate receipts.
+					</p>
+				</div>
+			</div>
+			<form
+				method="POST"
+				action="?/generateRentCharges"
+				use:enhance={workspaceSubmit}
+				data-managed-feedback="true"
+			>
+				<button class="secondary" type="submit">Generate due rent invoices</button>
+				<p class="muted">
+					Uses enabled recurring schedules and the invoice lead period. Re-running does not
+					duplicate invoices.
+				</p>
+			</form>
+			<div class="due-filters">
+				<select bind:value={dueProperty}
+					><option value="">All properties</option
+					>{#each data.properties as property (property.id)}<option value={property.id}
+							>{property.name}</option
+						>{/each}</select
+				><select bind:value={dueStatus}
+					><option value="open">Open balances</option><option value="all">All statuses</option
+					><option value="overdue">Overdue</option><option value="issued">Upcoming</option><option
+						value="paid">Paid</option
+					></select
+				>
+			</div>
+			<div class="due-table-wrap">
+				<table class="due-table">
+					<thead
+						><tr
+							><th>Tenant</th><th>Property</th><th>Rented space</th><th>Amount due</th><th
+								>Due date</th
+							><th>Status</th><th></th></tr
+						></thead
+					><tbody
+						>{#each activeCharges.filter((charge) => charge.charge_type === 'rent' && (!dueProperty || data.spaces.find((space) => space.id === data.tenancies.find((tenancy) => tenancy.id === charge.tenancy_id)?.space_id)?.property_id === dueProperty) && (dueStatus === 'all' || (dueStatus === 'open' ? !['paid', 'draft'].includes(statusForCharge(charge)) : statusForCharge(charge) === dueStatus))) as charge (charge.id)}{@const tenancy =
+								data.tenancies.find((item) => item.id === charge.tenancy_id)}{@const space =
+								data.spaces.find((item) => item.id === tenancy?.space_id)}<tr
+								><td>{tenantName(charge.tenancy_id)}</td><td
+									>{space ? propertyName(space.property_id) : '—'}</td
+								><td>{space?.name ?? '—'}</td><td
+									><strong>{money(outstandingForCharge(charge))}</strong></td
+								><td>{charge.due_on}</td><td
+									><span class={`charge-status ${statusForCharge(charge)}`}
+										>{statusForCharge(charge).replaceAll('_', ' ')}</span
+									></td
+								><td
+									><button
+										class="table-action"
+										type="button"
+										onclick={() => {
+											paymentTenancy = charge.tenancy_id;
+											tab = 'payments';
+										}}>Record payment →</button
+									></td
+								></tr
+							>{:else}<tr><td colspan="7">No rent charges match the selected filters.</td></tr
+							>{/each}</tbody
+					>
+				</table>
+			</div>
+		</section>
 	{:else if tab === 'charges'}
 		<div class="section-grid">
 			<section class="panel form-panel">
@@ -332,7 +521,14 @@
 				{#if data.tenancies.length === 0}<div class="empty">
 						<strong>Create a tenancy first.</strong>
 						<p>Charges need a person and rentable space.</p>
-					</div>{:else}<form method="POST" action="?/addCharge" class="form-stack">
+					</div>{:else}<form
+						data-managed-feedback="true"
+						use:enhance={workspaceSubmit}
+						method="POST"
+						action="?/addCharge"
+						data-reset-on-success="true"
+						class="form-stack"
+					>
 						<label
 							>Tenancy<select name="tenancy_id" required
 								><option value="">Choose tenancy</option
@@ -420,7 +616,7 @@
 						<strong>No charges yet.</strong>
 						<p>Issued rent and utility charges will appear here.</p>
 					</div>{:else}<div class="ledger-list">
-						{#each ledgerCharges.slice(0, 12) as charge (charge.id)}<div class="ledger-row">
+						{#each ledgerCharges.slice(0, 50) as charge (charge.id)}<div class="ledger-row">
 								<div>
 									<strong>{charge.description}</strong><small
 										>{tenantName(charge.tenancy_id)} · due {charge.due_on}{charge.charge_type ===
@@ -482,10 +678,18 @@
 						<p>Capture the receipt, then match it to the oldest outstanding charges.</p>
 					</div>
 				</div>
-				<form method="POST" action="?/recordPayment" class="form-stack">
+				<form
+					data-managed-feedback="true"
+					use:enhance={workspaceSubmit}
+					method="POST"
+					action="?/recordPayment"
+					use:submissionKey
+					data-reset-on-success="true"
+					class="form-stack"
+				>
 					<div class="form-grid two">
 						<label
-							>Tenancy<select name="tenancy_id"
+							>Tenancy<select name="tenancy_id" bind:value={paymentTenancy}
 								><option value="">Unallocated / not linked</option
 								>{#each data.tenancies as tenancy (tenancy.id)}<option value={tenancy.id}
 										>{tenantName(tenancy.id)} · {spaceName(tenancy.space_id)}</option
@@ -531,7 +735,7 @@
 					><label class="toggle"
 						><input name="generate_receipt" type="checkbox" checked /><span
 							><strong>Generate a receipt</strong><small
-								>Create a branded receipt and queue email delivery when possible.</small
+								>Create a receipt saved with this payment.</small
 							></span
 						></label
 					><button class="primary" type="submit">Record payment <span>→</span></button>
@@ -545,18 +749,18 @@
 						<p>Receipts without a full allocation need a quick review.</p>
 					</div>
 					<span class="count"
-						>{data.payments.filter(
+						>{filteredPayments.filter(
 							(payment) => amount(payment.amount) > allocatedForPayment(payment.id)
 						).length}</span
 					>
 				</div>
-				{#if !data.payments.some((payment) => amount(payment.amount) > allocatedForPayment(payment.id))}<div
+				{#if !filteredPayments.some((payment) => amount(payment.amount) > allocatedForPayment(payment.id))}<div
 						class="empty"
 					>
 						<strong>Nothing to match.</strong>
 						<p>Fully allocated payments disappear from this queue.</p>
 					</div>{:else}<div class="ledger-list">
-						{#each data.payments.filter((payment) => amount(payment.amount) > allocatedForPayment(payment.id)) as payment (payment.id)}<div
+						{#each filteredPayments.filter((payment) => amount(payment.amount) > allocatedForPayment(payment.id)) as payment (payment.id)}<div
 								class="allocation-row"
 							>
 								<div>
@@ -565,12 +769,18 @@
 									>
 								</div>
 								<b>{money(amount(payment.amount) - allocatedForPayment(payment.id))} open</b>
-								<form method="POST" action="?/allocatePayment" class="allocation-form">
+								<form
+									data-managed-feedback="true"
+									use:enhance={workspaceSubmit}
+									method="POST"
+									action="?/allocatePayment"
+									class="allocation-form"
+								>
 									<input type="hidden" name="payment_id" value={payment.id} /><select
 										name="charge_id"
 										required
 										><option value="">Choose charge</option
-										>{#each activeCharges.filter((charge) => outstandingForCharge(charge) > 0) as charge (charge.id)}<option
+										>{#each allIssuedCharges.filter((charge) => outstandingForCharge(charge) > 0) as charge (charge.id)}<option
 												value={charge.id}
 												>{charge.description} · {tenantName(charge.tenancy_id)} · {money(
 													outstandingForCharge(charge)
@@ -595,10 +805,10 @@
 					<p class="eyebrow">Payment register</p>
 					<h3>Recent payments</h3>
 				</div>
-				<span class="count">{data.payments.length}</span>
+				<span class="count">{filteredPayments.length}</span>
 			</div>
 			<div class="ledger-list">
-				{#each data.payments.slice(0, 15) as payment (payment.id)}<div class="ledger-row">
+				{#each filteredPayments.slice(0, 50) as payment (payment.id)}<div class="ledger-row">
 						<div>
 							<strong>{personName(payment.payer_person_id)}</strong><small
 								>{payment.payment_date} · {labelFor(payment.method)} · {payment.reference ??
@@ -627,7 +837,14 @@
 				{#if data.properties.length === 0}<div class="empty">
 						<strong>Add a property first.</strong>
 						<p>Expenses need a location.</p>
-					</div>{:else}<form method="POST" action="?/addExpense" class="form-stack">
+					</div>{:else}<form
+						data-managed-feedback="true"
+						use:enhance={workspaceSubmit}
+						method="POST"
+						action="?/addExpense"
+						data-reset-on-success="true"
+						class="form-stack"
+					>
 						<div class="form-grid two">
 							<label
 								>Property<select name="property_id" required
@@ -712,15 +929,13 @@
 						<h3>Recent operating costs</h3>
 						<p>Review cost, status, and property impact.</p>
 					</div>
-					<span class="count">{data.propertyExpenses.length}</span>
+					<span class="count">{filteredExpenses.length}</span>
 				</div>
-				{#if data.propertyExpenses.length === 0}<div class="empty">
+				{#if filteredExpenses.length === 0}<div class="empty">
 						<strong>No expenses recorded.</strong>
 						<p>Rates, utilities, repairs, and vendor costs will appear here.</p>
 					</div>{:else}<div class="ledger-list">
-						{#each data.propertyExpenses.slice(0, 15) as expense (expense.id)}<div
-								class="ledger-row"
-							>
+						{#each filteredExpenses.slice(0, 50) as expense (expense.id)}<div class="ledger-row">
 								<div>
 									<strong>{expense.description}</strong><small
 										>{propertyName(expense.property_id)} · {categoryLabels[expense.category] ??
@@ -776,7 +991,13 @@
 				{#if data.tenancies.length === 0}<div class="empty">
 						<strong>No tenancies available.</strong>
 						<p>Create a tenancy before following up.</p>
-					</div>{:else}<form method="POST" action="?/addCollectionFollowup" class="form-stack">
+					</div>{:else}<form
+						data-managed-feedback="true"
+						use:enhance={workspaceSubmit}
+						method="POST"
+						action="?/addCollectionFollowup"
+						class="form-stack"
+					>
 						<label
 							>Tenancy<select name="tenancy_id" required
 								><option value="">Choose tenancy</option
@@ -787,7 +1008,7 @@
 						><label
 							>Charge <small>Optional</small><select name="charge_id"
 								><option value="">General tenancy follow-up</option
-								>{#each activeCharges.filter((charge) => outstandingForCharge(charge) > 0) as charge (charge.id)}<option
+								>{#each allIssuedCharges.filter((charge) => outstandingForCharge(charge) > 0) as charge (charge.id)}<option
 										value={charge.id}
 										>{charge.description} · {tenantName(charge.tenancy_id)} · {money(
 											outstandingForCharge(charge)
@@ -834,7 +1055,18 @@
 									>{followup.notes} · {followup.next_action_on ?? 'No next action date'}</small
 								>
 							</div>
-							<span class={`badge ${followup.status}`}>{labelFor(followup.status)}</span>
+							<span class={`badge ${followup.status}`}>{labelFor(followup.status)}</span
+							>{#if ['open', 'promised'].includes(followup.status)}<form
+									method="POST"
+									action="?/resolveCollectionFollowup"
+									use:enhance={workspaceSubmit}
+									data-managed-feedback="true"
+								>
+									<input name="followup_id" type="hidden" value={followup.id} /><button
+										type="submit"
+										class="secondary">Resolve follow-up</button
+									>
+								</form>{/if}
 						</div>{/each}
 				</div>{/if}
 		</section>
@@ -872,9 +1104,6 @@
 		line-height: 0.98;
 		margin-bottom: 10px;
 		max-width: 680px;
-	}
-	h2 span {
-		color: var(--musha-lime);
 	}
 	h3 {
 		color: #0b4541;
@@ -1314,7 +1543,7 @@
 		border-bottom: 1px solid #e2ebe3;
 		color: #789287;
 		font-size: 10px;
-		letter-spacing: .08em;
+		letter-spacing: 0.08em;
 		padding: 12px 14px;
 		text-align: left;
 		text-transform: uppercase;
@@ -1326,9 +1555,16 @@
 		padding: 14px;
 		vertical-align: middle;
 	}
-	.due-table tbody tr:last-child td { border-bottom: 0; }
-	.due-table tbody tr:hover { background: #fbfdf9; }
-	.due-table td strong { color: #244f40; font-size: 12px; }
+	.due-table tbody tr:last-child td {
+		border-bottom: 0;
+	}
+	.due-table tbody tr:hover {
+		background: #fbfdf9;
+	}
+	.due-table td strong {
+		color: #244f40;
+		font-size: 12px;
+	}
 	.charge-status {
 		background: #edf4dc;
 		border-radius: 99px;
@@ -1339,9 +1575,18 @@
 		padding: 5px 8px;
 		text-transform: capitalize;
 	}
-	.charge-status.overdue { background: #fbe9e4; color: #a05748; }
-	.charge-status.partially_paid { background: #fff2d8; color: #9a7228; }
-	.charge-status.paid { background: #e3f1e6; color: #438057; }
+	.charge-status.overdue {
+		background: #fbe9e4;
+		color: #a05748;
+	}
+	.charge-status.partially_paid {
+		background: #fff2d8;
+		color: #9a7228;
+	}
+	.charge-status.paid {
+		background: #e3f1e6;
+		color: #438057;
+	}
 	.table-action {
 		background: #edf5d9;
 		border: 0;
@@ -1354,7 +1599,10 @@
 		padding: 8px 10px;
 		white-space: nowrap;
 	}
-	.table-action:hover { background: var(--musha-deep); color: #fff; }
+	.table-action:hover {
+		background: var(--musha-deep);
+		color: #fff;
+	}
 	@media (max-width: 1120px) {
 		.metric-row {
 			grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1395,7 +1643,9 @@
 		.allocation-form {
 			grid-template-columns: 1fr;
 		}
-		.due-filters select { min-width: 150px; }
+		.due-filters select {
+			min-width: 150px;
+		}
 	}
 	@media (max-width: 420px) {
 		.metric-row {
@@ -1407,6 +1657,428 @@
 		.arrears-list article {
 			align-items: flex-start;
 			flex-wrap: wrap;
+		}
+	}
+	/* Finance: consistent hierarchy, readable ledgers and restrained operational surfaces. */
+	.finance-workspace {
+		color: #294334;
+		gap: 22px;
+	}
+	.finance-workspace * {
+		box-sizing: border-box;
+	}
+	.finance-intro {
+		align-items: center;
+		gap: 25px;
+	}
+	.finance-intro h2 {
+		font-size: clamp(28px, 2.8vw, 40px);
+		font-weight: 500;
+		letter-spacing: -1.4px;
+		line-height: 1.2;
+		color: #294334;
+		max-width: 950px;
+		margin: 0 0 12px;
+	}
+	.finance-intro h2 em {
+		font-family: Georgia, serif;
+		font-weight: 400;
+	}
+	.finance-intro > div > p:last-child {
+		font-size: 11px;
+		line-height: 1.8;
+		color: #879775;
+		max-width: 700px;
+	}
+	.eyebrow {
+		font-size: 8px;
+		letter-spacing: 1.6px;
+		font-weight: 500;
+		color: #8c9f79;
+		margin-bottom: 12px;
+	}
+	.finance-tabs {
+		background: #e9eedf;
+		border-color: #dce5cf;
+		border-radius: 9px;
+		padding: 5px;
+		gap: 4px;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+	}
+	.finance-tabs button {
+		font-size: 10px;
+		font-weight: 500;
+		padding: 12px 17px;
+		color: #81956b;
+		border-radius: 6px;
+		white-space: nowrap;
+	}
+	.finance-tabs button.active {
+		background: #fffefa;
+		color: #456536;
+		box-shadow: 0 3px 8px #29433408;
+	}
+	.operations-filter {
+		display: flex;
+		align-items: end;
+		gap: 14px;
+		background: #edf1e5;
+		padding: 17px 20px;
+		border: 1px solid #dfe6d3;
+		border-radius: 10px;
+	}
+	.operations-filter label {
+		display: grid;
+		gap: 9px;
+		flex: 1;
+		min-width: 0;
+	}
+	.operations-filter .wide-search {
+		flex: 2;
+	}
+	.operations-filter label > span {
+		font-size: 8px;
+		color: #8da178;
+	}
+	.operations-filter input,
+	.operations-filter select {
+		font: inherit;
+		font-size: 10px;
+		border: 1px solid #d9e3cb;
+		background: #fffefa;
+		padding: 11px 12px;
+		border-radius: 5px;
+		color: #67804f;
+		min-width: 0;
+		width: 100%;
+	}
+	.operations-filter > button {
+		font: inherit;
+		font-size: 9px;
+		color: #7e9567;
+		white-space: nowrap;
+		border: 0;
+		background: none;
+		padding: 13px 5px;
+		cursor: pointer;
+	}
+	.operations-scope {
+		font-size: 9px;
+		color: #9ba98c;
+		line-height: 1.8;
+		margin: -10px 0 0;
+	}
+	.finance-actions {
+		display: flex;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+	.primary,
+	.secondary {
+		font-size: 11px;
+		font-weight: 500;
+		border-radius: 6px;
+		padding: 12px 17px;
+	}
+	.primary {
+		background: #294c38;
+		color: #fffefa;
+	}
+	.secondary {
+		background: #edf2e4;
+		color: #729255;
+		border-color: #d7e3c9;
+	}
+	.secondary-link,
+	.text-action {
+		font-size: 10px;
+		color: #76945a;
+	}
+	.metric-row {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 13px;
+	}
+	.metric {
+		padding: 21px 20px;
+		background: #fffefa;
+		border-color: #dce5cf;
+		border-radius: 12px;
+	}
+	.metric.emphasis {
+		background: #294c38;
+		border-color: #294c38;
+	}
+	.metric span,
+	.metric small {
+		font-size: 9px;
+		color: #8a9c75;
+		line-height: 1.7;
+	}
+	.metric strong {
+		font-size: 29px;
+		letter-spacing: -1px;
+		font-weight: 500;
+		margin: 12px 0 7px;
+		overflow-wrap: anywhere;
+	}
+	.metric.emphasis span,
+	.metric.emphasis small {
+		color: #bdcfaa;
+	}
+	.metric.attention {
+		background: #fff9ef;
+		border-color: #eee0c5;
+	}
+	.panel {
+		background: #fffefa;
+		border-color: #dfe6d3;
+		border-radius: 12px;
+		padding: 25px;
+	}
+	.panel-heading h3 {
+		font-size: 20px;
+		font-weight: 500;
+		line-height: 1.35;
+		letter-spacing: -0.7px;
+		color: #3e5e32;
+	}
+	.panel-heading p:not(.eyebrow) {
+		font-size: 11px;
+		color: #8e9e7d;
+		line-height: 1.9;
+	}
+	.overview-grid,
+	.section-grid {
+		gap: 18px;
+	}
+	.ledger-row {
+		border-color: #e3ead8;
+		padding: 17px 0;
+	}
+	.ledger-row strong,
+	.allocation-row strong,
+	.attention-list strong,
+	.category-list strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #5a7944;
+	}
+	.ledger-row small,
+	.allocation-row small,
+	.attention-list small,
+	.category-list small {
+		font-size: 9px;
+		color: #97a885;
+		line-height: 1.8;
+	}
+	.ledger-row > b,
+	.allocation-row > b,
+	.attention-list b,
+	.category-list b {
+		font-size: 13px;
+		font-weight: 500;
+		color: #76905c;
+	}
+	.badge,
+	.charge-status {
+		font-size: 8px;
+		font-weight: 500;
+		border-radius: 5px;
+		background: #edf2e4;
+		color: #7f9866;
+		padding: 7px 10px;
+	}
+	.charge-status.overdue {
+		background: #f7ecdc;
+		color: #a88751;
+	}
+	.form-stack label,
+	.form-grid label {
+		font-size: 11px;
+		font-weight: 500;
+		color: #789361;
+		line-height: 1.6;
+	}
+	.form-stack input,
+	.form-stack select,
+	.form-stack textarea,
+	.form-grid input,
+	.form-grid select {
+		font-size: 12px;
+		background: #fffefa;
+		border-color: #dbe5cf;
+		border-radius: 5px;
+		padding: 12px;
+		color: #567641;
+	}
+	.toggle {
+		background: #f1f5e8;
+		border-color: #dce7cd;
+	}
+	.toggle strong {
+		font-size: 11px;
+		font-weight: 500;
+	}
+	.toggle small {
+		font-size: 10px;
+		color: #98aa82;
+		line-height: 1.8;
+	}
+	.due-table th {
+		font-size: 9px;
+		font-weight: 500;
+		background: #edf1e5;
+		color: #81976b;
+		border-color: #dce5cf;
+	}
+	.due-table td {
+		font-size: 11px;
+		color: #719058;
+		border-color: #e5ecdc;
+		padding: 18px 14px;
+	}
+	.due-table td strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #526f3e;
+	}
+	.due-filters select {
+		font-size: 10px;
+		background: #fffefa;
+		border-color: #dce5cf;
+		color: #78965d;
+	}
+	.table-action {
+		font-size: 9px;
+		border-radius: 5px;
+		background: #edf2e4;
+		color: #719354;
+		border-color: #d9e5ca;
+	}
+	.empty {
+		background: #f8faf2;
+		border-color: #dce7cf;
+		border-radius: 10px;
+		padding: 30px;
+	}
+	.empty strong {
+		font-size: 13px;
+		font-weight: 500;
+		color: #6c8a53;
+	}
+	.empty p {
+		font-size: 11px;
+		line-height: 1.9;
+		color: #9bac88;
+	}
+	.arrears-list article {
+		border-color: #e2ead6;
+		background: #fafcf5;
+		border-radius: 8px;
+		padding: 18px;
+	}
+	.arrears-list article strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #67854e;
+	}
+	.arrears-list small {
+		font-size: 10px;
+		color: #97ab80;
+	}
+	.allocation-form {
+		gap: 10px;
+	}
+	.allocation-form select,
+	.allocation-form input {
+		font-size: 11px;
+		padding: 10px;
+		background: #fffefa;
+		border-color: #dde7d0;
+		color: #708f55;
+	}
+	.finance-workspace a:focus-visible,
+	.finance-workspace button:focus-visible,
+	.finance-workspace input:focus-visible,
+	.finance-workspace select:focus-visible {
+		outline: 2px solid #95ad79;
+		outline-offset: 3px;
+	}
+	:global(form[aria-busy='true']) {
+		opacity: 0.7;
+		cursor: wait;
+	}
+	:global(form[aria-busy='true']) button {
+		cursor: wait;
+	}
+	@media (max-width: 1000px) {
+		.operations-filter {
+			flex-wrap: wrap;
+		}
+		.operations-filter .wide-search {
+			flex-basis: 100%;
+		}
+		.finance-intro {
+			align-items: start;
+			flex-direction: column;
+		}
+		.metric-row {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+	@media (max-width: 600px) {
+		.finance-intro h2 {
+			font-size: 31px;
+		}
+		.panel {
+			padding: 20px 16px;
+		}
+		.metric {
+			padding: 17px 14px;
+		}
+		.metric strong {
+			font-size: 24px;
+		}
+		.metric-row {
+			gap: 10px;
+		}
+		.operations-filter {
+			padding: 16px;
+			gap: 15px 10px;
+		}
+		.operations-filter label {
+			flex-basis: 40%;
+		}
+		.operations-filter .wide-search {
+			flex-basis: 100%;
+		}
+		.finance-tabs button {
+			font-size: 10px;
+			padding: 12px;
+		}
+		.finance-actions .primary,
+		.finance-actions .secondary {
+			font-size: 10px;
+			flex: 1;
+			white-space: nowrap;
+		}
+		.ledger-row {
+			gap: 12px;
+		}
+		.allocation-row {
+			flex-wrap: wrap;
+		}
+		.allocation-form {
+			width: 100%;
+		}
+		.operations-scope {
+			font-size: 9px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.finance-workspace * {
+			transition: none !important;
 		}
 	}
 </style>

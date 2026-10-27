@@ -1,4 +1,9 @@
 <script lang="ts">
+	import { tick } from 'svelte';
+	import { resolve } from '$app/paths';
+	import { enhance } from '$app/forms';
+	import { workspaceSubmit } from '$lib/forms/workspace-submit';
+	import { maintenanceOrder, maintenanceNextStates } from '$lib/dashboard/operations';
 	let { data, form } = $props();
 	const categories = {
 		plumbing: 'Plumbing',
@@ -54,6 +59,16 @@
 	};
 	let view = $state('overview');
 	let search = $state('');
+	let propertyFilter = $state('all');
+	let statusFilter = $state('all');
+	let showIntake = $state(false);
+	let focusedRequest = $state('');
+	async function openWork(id: string) {
+		view = 'planned';
+		focusedRequest = id;
+		await tick();
+		document.getElementById('work-' + id)?.scrollIntoView({ block: 'center' });
+	}
 	let categoryFilter = $state('all');
 	let priorityFilter = $state('all');
 	let vendorFilter = $state('all');
@@ -74,28 +89,28 @@
 	);
 	const visibleRequests = $derived(
 		data.maintenance.filter(
-			(item: { title: string; description?: string; category: string; priority: string }) => {
+			(item: {
+				title: string;
+				description?: string;
+				category: string;
+				priority: string;
+				property_id: string;
+				status: string;
+			}) => {
 				const needle = search.trim().toLowerCase();
 				const text =
-					`${item.title} ${item.description ?? ''} ${categories[item.category as keyof typeof categories] ?? item.category}`.toLowerCase();
+					`${item.title} ${item.description ?? ''} ${propertyName(item.property_id)} ${categories[item.category as keyof typeof categories] ?? item.category}`.toLowerCase();
 				return (
 					(!needle || text.includes(needle)) &&
 					(categoryFilter === 'all' || item.category === categoryFilter) &&
-					(priorityFilter === 'all' || item.priority === priorityFilter)
+					(priorityFilter === 'all' || item.priority === priorityFilter) &&
+					(propertyFilter === 'all' || item.property_id === propertyFilter) &&
+					(statusFilter === 'all' || item.status === statusFilter)
 				);
 			}
 		)
 	);
-	const plannedRequests = $derived(
-		visibleRequests.filter((item: { scheduled_for?: string | null }) => Boolean(item.scheduled_for))
-	);
-	const workQueue = $derived(
-		[...openRequests].sort(
-			(a: { scheduled_for?: string | null; created_at: string }, b: { scheduled_for?: string | null; created_at: string }) =>
-				(a.scheduled_for ?? '9999-12-31').localeCompare(b.scheduled_for ?? '9999-12-31') ||
-				b.created_at.localeCompare(a.created_at)
-		)
-	);
+	const workQueue = $derived([...openRequests].sort(maintenanceOrder));
 	const requestBoardRequests = $derived(
 		visibleRequests.filter(
 			(item: { status: string }) => !['completed', 'closed'].includes(item.status)
@@ -111,14 +126,23 @@
 	);
 	const visibleVendors = $derived(
 		data.maintenanceVendors.filter(
-			(item: { business_name: string; contact_name?: string | null; email?: string | null; resource_type?: string; status: string; specialties?: string[] }) => {
+			(item: {
+				business_name: string;
+				contact_name?: string | null;
+				email?: string | null;
+				resource_type?: string;
+				status: string;
+				specialties?: string[];
+			}) => {
 				const needle = vendorSearch.trim().toLowerCase();
-				const text = `${item.business_name} ${item.contact_name ?? ''} ${item.email ?? ''}`.toLowerCase();
+				const text =
+					`${item.business_name} ${item.contact_name ?? ''} ${item.email ?? ''}`.toLowerCase();
 				return (
 					(!needle || text.includes(needle)) &&
 					(vendorFilter === 'all' || (item.resource_type ?? 'external') === vendorFilter) &&
 					(vendorStatusFilter === 'all' || item.status === vendorStatusFilter) &&
-					(vendorSpecialtyFilter === 'all' || (item.specialties ?? []).includes(vendorSpecialtyFilter))
+					(vendorSpecialtyFilter === 'all' ||
+						(item.specialties ?? []).includes(vendorSpecialtyFilter))
 				);
 			}
 		)
@@ -126,7 +150,9 @@
 	const specialtyOptions = $derived(
 		Array.from(
 			new Set(
-				data.maintenanceVendors.flatMap((item: { specialties?: string[] }) => item.specialties ?? [])
+				data.maintenanceVendors.flatMap(
+					(item: { specialties?: string[] }) => item.specialties ?? []
+				)
 			)
 		).sort()
 	);
@@ -151,7 +177,9 @@
 			.map(([key, label]) => ({
 				key,
 				label,
-				count: data.maintenance.filter((item: { category: string }) => item.category === key).length
+				count: openRequests.filter(
+					(item: { category: string }) => (item.category || 'general') === key
+				).length
 			}))
 			.filter((item) => item.count > 0)
 			.sort((a, b) => b.count - a.count)
@@ -197,6 +225,22 @@
 </script>
 
 <div class="maintenance-shell">
+	<header class="maintenance-intro">
+		<div>
+			<p class="eyebrow">WORKSPACE / MAINTENANCE</p>
+			<h1>Good care. <em>Clear responsibility.</em></h1>
+			<p>Report, assign and resolve work with the right context at every step.</p>
+		</div>
+		<button
+			class="primary"
+			type="button"
+			onclick={() => {
+				view = 'requests';
+				showIntake = !showIntake;
+			}}>{showIntake ? 'Close intake' : '+ Log request'}</button
+		>
+	</header>
+
 	{#if form?.message}<div class:success={form.success} class="inline-feedback">
 			{form.message}
 		</div>{/if}
@@ -205,13 +249,63 @@
 			<span class="nav-label">Maintenance workspace</span><strong>Keep every issue moving.</strong>
 		</div>
 		<div class="tabs">
-			{#each [['overview', 'Overview'], ['requests', 'Requests'], ['planned', 'Planned work'], ['vendors', 'Vendors'], ['preventive', 'Preventive'], ['sla', 'SLA watch'], ['history', 'History']] as tab (tab[0])}{#if tab[0] === 'vendors'}<a href={`/workspace/${data.organization.id}/vendors`}>{tab[1]}</a>{:else}<button
-					class:active={view === tab[0]}
-					type="button"
-					onclick={() => (view = tab[0])}>{tab[1]}</button
-				>{/if}{/each}
+			{#each [['overview', 'Overview'], ['requests', 'Requests'], ['planned', 'Planned work'], ['vendors', 'Vendors'], ['preventive', 'Preventive'], ['sla', 'SLA watch'], ['history', 'History']] as tab (tab[0])}{#if tab[0] === 'vendors'}<a
+						href={resolve(`/workspace/${data.organization.id}/vendors`)}>{tab[1]}</a
+					>{:else}<button
+						class:active={view === tab[0]}
+						type="button"
+						onclick={() => (view = tab[0])}>{tab[1]}</button
+					>{/if}{/each}
 		</div>
 	</nav>
+	{#if !['vendors', 'preventive', 'sla'].includes(view)}<div class="operations-filter">
+			<label class="wide-search"
+				><span>Search work orders</span><input
+					type="search"
+					bind:value={search}
+					placeholder="Request, property or category"
+				/></label
+			><label
+				><span>Property</span><select bind:value={propertyFilter}
+					><option value="all">All properties</option
+					>{#each data.properties as property (property.id)}<option value={property.id}
+							>{property.name}</option
+						>{/each}</select
+				></label
+			><label
+				><span>Priority</span><select bind:value={priorityFilter}
+					><option value="all">All priorities</option
+					>{#each Object.entries(priorityLabels) as [key, title] (key)}<option value={key}
+							>{title}</option
+						>{/each}</select
+				></label
+			><label
+				><span>Status</span><select bind:value={statusFilter}
+					><option value="all">All statuses</option>{#each statuses as status (status)}<option
+							value={status}>{statusLabels[status]}</option
+						>{/each}</select
+				></label
+			><label
+				><span>Category</span><select bind:value={categoryFilter}
+					><option value="all">All categories</option
+					>{#each Object.entries(categories) as [key, title] (key)}<option value={key}
+							>{title}</option
+						>{/each}</select
+				></label
+			><button
+				type="button"
+				onclick={() => {
+					search = '';
+					propertyFilter = 'all';
+					priorityFilter = 'all';
+					statusFilter = 'all';
+					categoryFilter = 'all';
+				}}>Reset</button
+			>
+		</div>
+		<p class="operations-scope">
+			Work queues, category counts and request metrics reflect your filters.
+		</p>{/if}
 
 	{#if view === 'overview'}
 		<div class="metric-row maintenance-metrics">
@@ -231,7 +325,7 @@
 			<div class="metric-card">
 				<span>Maintenance spend</span><strong
 					>{money(
-						data.maintenance.reduce(
+						visibleRequests.reduce(
 							(sum: number, item: { actual_cost?: number | string | null }) =>
 								sum + Number(item.actual_cost ?? 0),
 							0
@@ -246,7 +340,7 @@
 					<div>
 						<p class="eyebrow">Request pulse</p>
 						<h2>What needs attention?</h2>
-						<p>Open work, ordered by the latest report.</p>
+						<p>Open work, ordered by priority, SLA deadline and age.</p>
 					</div>
 					<button class="text-link" type="button" onclick={() => (view = 'requests')}
 						>View all →</button
@@ -256,7 +350,11 @@
 						<strong>Your maintenance board is clear.</strong>
 						<p>New client requests and inspections will appear here.</p>
 					</div>{:else}<div class="pulse-list">
-						{#each openRequests.slice(0, 5) as request (request.id)}<div class="pulse-row">
+						{#each workQueue.slice(0, 5) as request (request.id)}<button
+								type="button"
+								class="pulse-row"
+								onclick={() => void openWork(request.id)}
+							>
 								<span class="priority-dot {request.priority}"></span>
 								<div class="pulse-main">
 									<strong>{request.title}</strong><small
@@ -269,7 +367,7 @@
 									class="tag priority {request.priority}"
 									>{label(priorityLabels, request.priority)}</span
 								>
-							</div>{/each}
+							</button>{/each}
 					</div>{/if}
 			</section>
 			<section class="panel">
@@ -277,7 +375,7 @@
 					<div>
 						<p class="eyebrow">Work mix</p>
 						<h2>Issues by category</h2>
-						<p>Use patterns to plan recurring work.</p>
+						<p>Current open requests matching your filters.</p>
 					</div>
 				</div>
 				{#if categoryCounts.length === 0}<div class="empty compact">
@@ -287,8 +385,7 @@
 						{#each categoryCounts as item (item.key)}<div class="category-line">
 								<div><span>{item.label}</span><strong>{item.count}</strong></div>
 								<div class="bar">
-									<i style={`width: ${(item.count / Math.max(data.maintenance.length, 1)) * 100}%`}
-									></i>
+									<i style={`width: ${(item.count / Math.max(openRequests.length, 1)) * 100}%`}></i>
 								</div>
 							</div>{/each}
 					</div>{/if}
@@ -314,7 +411,7 @@
 							>Reported</span
 						>
 					</div>
-					{#each data.maintenance.slice(0, 6) as request (request.id)}<div class="tracker-row">
+					{#each visibleRequests.slice(0, 6) as request (request.id)}<div class="tracker-row">
 							<div>
 								<strong>{request.title}</strong><small
 									>{shortId(request.id)} · {label(categories, request.category)}</small
@@ -343,130 +440,167 @@
 		</section>
 	{:else if view === 'requests'}
 		<div class="maintenance-grid requests-layout">
-			{#if false}<section class="panel form-panel request-intake-panel" aria-hidden="true">
-				<div class="panel-heading">
-					<div>
-						<p class="eyebrow">New request</p>
-						<h2>Log a maintenance issue</h2>
-						<p>Capture what was reported. Planning and assignment happen separately in Planned work.</p>
+			{#if showIntake}<section class="panel form-panel request-intake-panel">
+					<div class="panel-heading">
+						<div>
+							<p class="eyebrow">New request</p>
+							<h2>Log a maintenance issue</h2>
+							<p>
+								Capture what was reported. Planning and assignment happen separately in Planned
+								work.
+							</p>
+						</div>
+						<span class="count">{data.maintenance.length} total</span>
 					</div>
-					<span class="count">{data.maintenance.length} total</span>
-				</div>
-				{#if data.properties.length === 0}<div class="empty compact">
-						<strong>Add a property first.</strong>
-						<p>Requests need a location so your team can respond clearly.</p>
-					</div>{:else}<form method="POST" action="?/createMaintenance" class="form-stack">
-						<div class="form-grid two">
-							<label
-								>Property<select name="property_id" required
-									><option value="">Choose property</option
-									>{#each data.properties as property (property.id)}<option value={property.id}
-											>{property.name}</option
-										>{/each}</select
-								></label
-							><label
-								>Space <small>Optional</small><select name="space_id"
-									><option value="">Whole property</option
-									>{#each data.spaces as space (space.id)}<option value={space.id}
-											>{space.name} · {propertyName(space.property_id)}</option
-										>{/each}</select
-								></label
-							>
-						</div>
-						<div class="form-grid two">
-							<label
-								>Issue title<input name="title" required placeholder="Leaking kitchen tap" /></label
-							><label
-								>Category<select name="category"
-									><option value="general">General</option
-									>{#each Object.entries(categories) as item (item[0])}<option value={item[0]}
-											>{item[1]}</option
-										>{/each}</select
-								></label
-							>
-						</div>
-						<div class="form-grid three">
-							<label
-								>Priority<select name="priority"
-									><option value="normal">Normal</option><option value="low">Low</option><option
-										value="high">High</option
-									><option value="urgent">Urgent</option></select
-								></label
-							><label
-								>Reported by<select name="reporter_person_id"
-									><option value="">Not linked</option
-									>{#each data.people as person (person.id)}<option value={person.id}
-											>{person.first_name} {person.last_name}</option
-										>{/each}</select
-								></label
-							><label
-								>Source<select name="source"
-									><option value="client">Client</option><option value="staff">Staff</option><option
-										value="inspection">Inspection</option
-									><option value="preventive">Preventive</option></select
-								></label
-							>
-						</div>
-						<label
-							>Description<textarea
-								name="description"
-								rows="4"
-								placeholder="What happened, when it was noticed, access notes, and any safety concern"
-							></textarea></label
+					{#if data.properties.length === 0}<div class="empty compact">
+							<strong>Add a property first.</strong>
+							<p>Requests need a location so your team can respond clearly.</p>
+						</div>{:else}<form
+							data-managed-feedback="true"
+							use:enhance={workspaceSubmit}
+							method="POST"
+							action="?/createMaintenance"
+							data-reset-on-success="true"
+							class="form-stack"
 						>
-						<div class="form-grid two schedule-fields">
-							<label>Service target <small>Optional</small><input name="sla_due_at" type="datetime-local" /></label><label
-								>Estimated cost ({data.organization.currency_code})<input
-									name="estimated_cost"
-									type="number"
-									min="0"
-									step="0.01"
-								/></label
+							<div class="form-grid two">
+								<label
+									>Property<select name="property_id" required
+										><option value="">Choose property</option
+										>{#each data.properties as property (property.id)}<option value={property.id}
+												>{property.name}</option
+											>{/each}</select
+									></label
+								><label
+									>Space <small>Optional</small><select name="space_id"
+										><option value="">Whole property</option
+										>{#each data.spaces as space (space.id)}<option value={space.id}
+												>{space.name} · {propertyName(space.property_id)}</option
+											>{/each}</select
+									></label
+								>
+							</div>
+							<div class="form-grid two">
+								<label
+									>Issue title<input
+										name="title"
+										required
+										placeholder="Leaking kitchen tap"
+									/></label
+								><label
+									>Category<select name="category"
+										><option value="general">General</option
+										>{#each Object.entries(categories) as item (item[0])}<option value={item[0]}
+												>{item[1]}</option
+											>{/each}</select
+									></label
+								>
+							</div>
+							<div class="form-grid three">
+								<label
+									>Priority<select name="priority"
+										><option value="normal">Normal</option><option value="low">Low</option><option
+											value="high">High</option
+										><option value="urgent">Urgent</option></select
+									></label
+								><label
+									>Reported by<select name="reporter_person_id"
+										><option value="">Not linked</option
+										>{#each data.people as person (person.id)}<option value={person.id}
+												>{person.first_name} {person.last_name}</option
+											>{/each}</select
+									></label
+								><label
+									>Source<select name="source"
+										><option value="client">Client</option><option value="staff">Staff</option
+										><option value="inspection">Inspection</option><option value="preventive"
+											>Preventive</option
+										></select
+									></label
+								>
+							</div>
+							<label
+								>Description<textarea
+									name="description"
+									rows="4"
+									placeholder="What happened, when it was noticed, access notes, and any safety concern"
+								></textarea></label
 							>
-						</div>
-						<button class="primary" type="submit">Log maintenance request <span>→</span></button>
-					</form>{/if}
-			</section>{/if}
+							<div class="form-grid two schedule-fields">
+								<label
+									>Service target <small>Optional</small><input
+										name="sla_due_at"
+										type="datetime-local"
+									/></label
+								><label
+									>Estimated cost ({data.organization.currency_code})<input
+										name="estimated_cost"
+										type="number"
+										min="0"
+										step="0.01"
+									/></label
+								>
+							</div>
+							<button class="primary" type="submit">Log maintenance request <span>→</span></button>
+						</form>{/if}
+				</section>{/if}
 			<section class="panel board-panel request-board-panel">
 				<div class="panel-heading">
 					<div>
 						<p class="eyebrow">Request board</p>
 						<h2>Reported issues</h2>
-						<p>Tenant and inspection reports arrive here as an intake register. Assignment, scheduling, and progress are managed in Planned work.</p>
+						<p>
+							Tenant and inspection reports arrive here as an intake register. Assignment,
+							scheduling, and progress are managed in Planned work.
+						</p>
 					</div>
 					<span class="count">{requestBoardRequests.length} open</span>
 				</div>
-				<div class="filters">
-					<input
-						aria-label="Search requests"
-						placeholder="Search requests"
-						bind:value={search}
-					/><select aria-label="Filter category" bind:value={categoryFilter}
-						><option value="all">All categories</option
-						>{#each Object.entries(categories) as item (item[0])}<option value={item[0]}
-								>{item[1]}</option
-							>{/each}</select
-					><select aria-label="Filter priority" bind:value={priorityFilter}
-						><option value="all">All priorities</option
-						>{#each Object.entries(priorityLabels) as item (item[0])}<option value={item[0]}
-								>{item[1]}</option
-							>{/each}</select
-					>
-				</div>
+
 				{#if requestBoardRequests.length > 0}<div class="request-table-wrap">
-					<table class="system-table request-table">
-						<thead><tr><th>Request</th><th>Location</th><th>Reported by</th><th>Reported</th><th>Category</th><th>Priority</th><th>Evidence</th></tr></thead>
-						<tbody>{#each requestBoardRequests as request (request.id)}<tr>
-							<td><strong>{request.title}</strong><small>{shortId(request.id)}</small>{#if request.description}<p>{request.description}</p>{/if}</td>
-							<td><strong>{propertyName(request.property_id)}</strong><small>{spaceName(request.space_id)}</small></td>
-							<td><strong>{request.reporter_person_id ? personName(request.reporter_person_id) : 'Not linked'}</strong><small>{label(sourceLabels, request.source)}</small></td>
-							<td>{dateLabel(request.reported_at ?? request.created_at)}</td>
-							<td><span class="tag category">{label(categories, request.category)}</span></td>
-							<td><span class="tag priority {request.priority}">{label(priorityLabels, request.priority)}</span></td>
-							<td>{attachmentsFor(request.id).length} file{attachmentsFor(request.id).length === 1 ? '' : 's'}</td>
-						</tr>{/each}</tbody>
-					</table>
-				</div>{/if}
+						<table class="system-table request-table">
+							<thead
+								><tr
+									><th>Request</th><th>Location</th><th>Reported by</th><th>Reported</th><th
+										>Category</th
+									><th>Priority</th><th>Evidence</th></tr
+								></thead
+							>
+							<tbody
+								>{#each requestBoardRequests as request (request.id)}<tr>
+										<td
+											><strong>{request.title}</strong><small>{shortId(request.id)}</small
+											>{#if request.description}<p>{request.description}</p>{/if}</td
+										>
+										<td
+											><strong>{propertyName(request.property_id)}</strong><small
+												>{spaceName(request.space_id)}</small
+											></td
+										>
+										<td
+											><strong
+												>{request.reporter_person_id
+													? personName(request.reporter_person_id)
+													: 'Not linked'}</strong
+											><small>{label(sourceLabels, request.source)}</small></td
+										>
+										<td>{dateLabel(request.reported_at ?? request.created_at)}</td>
+										<td><span class="tag category">{label(categories, request.category)}</span></td>
+										<td
+											><span class="tag priority {request.priority}"
+												>{label(priorityLabels, request.priority)}</span
+											></td
+										>
+										<td
+											>{attachmentsFor(request.id).length} file{attachmentsFor(request.id)
+												.length === 1
+												? ''
+												: 's'}</td
+										>
+									</tr>{/each}</tbody
+							>
+						</table>
+					</div>{/if}
 				{#if requestBoardRequests.length === 0}<div class="empty compact">
 						<strong>No matching requests.</strong>
 						<p>Try clearing a filter. New requests are submitted by tenants and inspections.</p>
@@ -493,8 +627,11 @@
 									</div>
 								</div>
 								<div class="request-meta">
-									<span><b>Reported by</b>{request.reporter_person_id ? personName(request.reporter_person_id) : 'Not linked'}</span><span
-										><b>Reported</b>{dateLabel(request.reported_at ?? request.created_at)}</span
+									<span
+										><b>Reported by</b>{request.reporter_person_id
+											? personName(request.reporter_person_id)
+											: 'Not linked'}</span
+									><span><b>Reported</b>{dateLabel(request.reported_at ?? request.created_at)}</span
 									><span><b>Assigned</b>{personName(request.assigned_person_id)}</span><span
 										><b>Estimate</b>{request.estimated_cost
 											? money(request.estimated_cost)
@@ -510,11 +647,17 @@
 									</div>
 									<small>{label(statusLabels, request.status)}</small>
 								</div>
-								<form method="POST" action="?/updateMaintenanceRequest" class="request-edit">
+								<form
+									data-managed-feedback="true"
+									use:enhance={workspaceSubmit}
+									method="POST"
+									action="?/updateMaintenanceRequest"
+									class="request-edit"
+								>
 									<input type="hidden" name="request_id" value={request.id} /><select
 										name="status"
 										aria-label="Request status"
-										>{#each statuses as status (status)}<option
+										>{#each maintenanceNextStates(request.status) as status (status)}<option
 												value={status}
 												selected={request.status === status}>{statusLabels[status]}</option
 											>{/each}</select
@@ -554,15 +697,45 @@
 										value={request.actual_cost ?? ''}
 										placeholder="Actual cost"
 										aria-label="Actual cost"
+									/><input
+										name="resolution_notes"
+										value={request.resolution_notes ?? ''}
+										placeholder="Resolution / work completed"
+										aria-label="Resolution notes"
 									/><button class="secondary" type="submit">Save update <span>→</span></button>
 								</form>
+								{#if request.status === 'awaiting_approval'}<p>
+										Review the uploaded evidence and actual cost before completing this request. {request.cost_approved_at
+											? 'Cost approved on ' + request.cost_approved_at
+											: 'Cost approval pending.'}
+									</p>
+									<form
+										method="POST"
+										action="?/approveMaintenanceCost"
+										hidden={!data.membership ||
+											!['owner', 'admin', 'manager', 'finance'].includes(data.membership.role) ||
+											Boolean(request.cost_approved_at)}
+										use:enhance={workspaceSubmit}
+										data-managed-feedback="true"
+									>
+										<input type="hidden" name="request_id" value={request.id} /><button
+											type="submit"
+											class="secondary">Approve actual cost</button
+										>
+									</form>{/if}
 								{#if request.description}<p class="request-description">
 										{request.description}
 									</p>{/if}{#if updatesFor(request.id).length > 0}<div class="update-preview">
 										<strong>Latest update</strong><span>{updatesFor(request.id)[0].body}</span
 										><small>{dateLabel(updatesFor(request.id)[0].created_at)}</small>
 									</div>{/if}
-								<form method="POST" action="?/addMaintenanceUpdate" class="quick-update">
+								<form
+									data-managed-feedback="true"
+									use:enhance={workspaceSubmit}
+									method="POST"
+									action="?/addMaintenanceUpdate"
+									class="quick-update"
+								>
 									<input type="hidden" name="request_id" value={request.id} /><input
 										name="body"
 										placeholder="Add a progress note or access update…"
@@ -586,7 +759,15 @@
 													><small
 														>{Math.max(1, Math.round((attachment.file_size ?? 0) / 1024))} KB</small
 													>
-													<form method="POST" action="?/deleteMaintenanceAttachment">
+													<form
+														data-managed-feedback="true"
+														use:enhance={workspaceSubmit}
+														method="POST"
+														action="?/deleteMaintenanceAttachment"
+														hidden={['awaiting_approval', 'completed', 'closed'].includes(
+															request.status
+														)}
+													>
 														<input
 															type="hidden"
 															name="attachment_id"
@@ -596,6 +777,8 @@
 												</div>{/each}
 										</div>{/if}
 									<form
+										data-managed-feedback="true"
+										use:enhance={workspaceSubmit}
 										method="POST"
 										action="?/uploadMaintenanceAttachment"
 										enctype="multipart/form-data"
@@ -619,7 +802,10 @@
 				<div>
 					<p class="eyebrow">Planned work</p>
 					<h2>Plan and deliver work</h2>
-					<p>Assign an internal resource or external contractor from the vendor directory, set the planned start, then move each task through to completion.</p>
+					<p>
+						Assign an internal resource or external contractor from the vendor directory, set the
+						planned start, then move each task through to completion.
+					</p>
 				</div>
 				<button class="secondary" type="button" onclick={() => (view = 'requests')}
 					>Manage requests <span>→</span></button
@@ -629,31 +815,102 @@
 					<strong>No open maintenance work.</strong>
 					<p>New requests will appear here for internal planning.</p>
 				</div>{:else}<div class="planned-list">
-					{#each workQueue as request (request.id)}<article class="planned-task"><div class="planned-row">
-							<div class="date-block">
-								{#if request.scheduled_for}<strong>{new Date(request.scheduled_for).getDate()}</strong><small>{new Intl.DateTimeFormat('en-GB', { month: 'short' }).format(new Date(request.scheduled_for))}</small>{:else}<strong>+</strong><small>Plan</small>{/if}
-							</div>
-							<div>
-								<strong>{request.title}</strong><small
-									>{propertyName(request.property_id)} · {spaceName(request.space_id)} · {label(
-										categories,
-										request.category
-									)}</small
+					{#each workQueue as request (request.id)}<details
+							class="planned-task"
+							id={`work-${request.id}`}
+							open={focusedRequest === request.id}
+						>
+							<summary class="planned-row">
+								<div class="date-block">
+									{#if request.scheduled_for}<strong
+											>{new Date(request.scheduled_for).getDate()}</strong
+										><small
+											>{new Intl.DateTimeFormat('en-GB', { month: 'short' }).format(
+												new Date(request.scheduled_for)
+											)}</small
+										>{:else}<strong>+</strong><small>Plan</small>{/if}
+								</div>
+								<div>
+									<strong>{request.title}</strong><small
+										>{propertyName(request.property_id)} · {spaceName(request.space_id)} · {label(
+											categories,
+											request.category
+										)}</small
+									>
+								</div>
+								<span class="tag priority {request.priority}"
+									>{label(priorityLabels, request.priority)}</span
+								><span class="tag status {request.status}"
+									>{label(statusLabels, request.status)}</span
+								><span class="muted"
+									>{request.vendor_id ? vendorName(request.vendor_id) : 'Unassigned'}</span
 								>
-							</div>
-							<span class="tag priority {request.priority}"
-								>{label(priorityLabels, request.priority)}</span
-							><span class="tag status {request.status}">{label(statusLabels, request.status)}</span
-							><span class="muted">{request.vendor_id ? vendorName(request.vendor_id) : 'Unassigned'}</span>
-						</div>
-						<form method="POST" action="?/scheduleMaintenanceRequest" class="task-plan-form">
-							<input type="hidden" name="request_id" value={request.id} />
-							<label>Planned start<input name="scheduled_for" type="date" value={request.scheduled_for ?? ''} required /></label>
-							<label>Assigned resource<select name="vendor_id"><option value="">Not assigned</option>{#each activeVendors as vendor (vendor.id)}<option value={vendor.id} selected={request.vendor_id === vendor.id}>{vendor.business_name} · {vendor.resource_type === 'internal' ? 'Internal' : 'External'}</option>{/each}</select></label>
-							<button class="secondary" type="submit">Save plan</button>
-						</form>
-						{#if request.status === 'in_progress'}<form method="POST" action="?/finishMaintenanceTask" class="task-complete-form"><input type="hidden" name="request_id" value={request.id} /><input name="resolution_notes" placeholder="Work completed / resolution notes" /><input name="actual_cost" type="number" min="0" step="0.01" placeholder={`Actual cost (${data.organization.currency_code})`} /><button class="primary" type="submit">Finish task <span>→</span></button></form>{:else if request.status !== 'completed' && request.status !== 'closed'}<form method="POST" action="?/startMaintenanceTask" class="task-start-form"><input type="hidden" name="request_id" value={request.id} /><button class="primary" type="submit" disabled={!request.scheduled_for}>Start maintenance task <span>→</span></button>{#if !request.scheduled_for}<small>Set a planned start before starting this task.</small>{/if}</form>{/if}
-					</article>{/each}
+							</summary>
+							<form
+								data-managed-feedback="true"
+								use:enhance={workspaceSubmit}
+								method="POST"
+								action="?/scheduleMaintenanceRequest"
+								class="task-plan-form"
+							>
+								<input type="hidden" name="request_id" value={request.id} />
+								<label
+									>Planned start<input
+										name="scheduled_for"
+										type="date"
+										value={request.scheduled_for ?? ''}
+										required
+									/></label
+								>
+								<label
+									>Assigned resource<select name="vendor_id"
+										><option value="">Not assigned</option
+										>{#each activeVendors as vendor (vendor.id)}<option
+												value={vendor.id}
+												selected={request.vendor_id === vendor.id}
+												>{vendor.business_name} · {vendor.resource_type === 'internal'
+													? 'Internal'
+													: 'External'}</option
+											>{/each}</select
+									></label
+								>
+								<button class="secondary" type="submit">Save plan</button>
+							</form>
+							{#if request.status === 'in_progress'}<form
+									data-managed-feedback="true"
+									use:enhance={workspaceSubmit}
+									method="POST"
+									action="?/finishMaintenanceTask"
+									class="task-complete-form"
+								>
+									<input type="hidden" name="request_id" value={request.id} /><input
+										required
+										name="resolution_notes"
+										placeholder="Work completed / resolution notes"
+									/><input
+										name="actual_cost"
+										type="number"
+										min="0"
+										step="0.01"
+										placeholder={`Actual cost (${data.organization.currency_code})`}
+									/><button class="primary" type="submit">Submit for review <span>→</span></button>
+								</form>{:else if request.status !== 'completed' && request.status !== 'closed'}<form
+									data-managed-feedback="true"
+									use:enhance={workspaceSubmit}
+									method="POST"
+									action="?/startMaintenanceTask"
+									class="task-start-form"
+								>
+									<input type="hidden" name="request_id" value={request.id} /><button
+										class="primary"
+										type="submit"
+										disabled={!request.scheduled_for || !request.vendor_id}
+										>Start maintenance task <span>→</span></button
+									>{#if !request.scheduled_for}<small
+											>Assign a resource and a planned date before starting this task.</small
+										>{/if}
+								</form>{/if}
+						</details>{/each}
 				</div>{/if}
 		</section>
 	{:else if view === 'vendors'}
@@ -667,7 +924,14 @@
 					</div>
 					<span class="count">{activeVendors.length} active</span>
 				</div>
-				<form method="POST" action="?/createMaintenanceVendor" class="form-stack">
+				<form
+					data-managed-feedback="true"
+					use:enhance={workspaceSubmit}
+					method="POST"
+					action="?/createMaintenanceVendor"
+					data-reset-on-success="true"
+					class="form-stack"
+				>
 					<div class="form-grid two">
 						<label
 							>Business name<input
@@ -678,12 +942,26 @@
 						><label>Contact person<input name="contact_name" placeholder="Primary contact" /></label
 						>
 					</div>
-					<label>Resource type<select name="resource_type"><option value="internal">Internal maintenance team</option><option value="external" selected>External vendor / contractor</option></select></label>
+					<label
+						>Resource type<select name="resource_type"
+							><option value="internal">Internal maintenance team</option><option
+								value="external"
+								selected>External vendor / contractor</option
+							></select
+						></label
+					>
 					<div class="form-grid two">
 						<label>Email<input name="email" type="email" placeholder="ops@contractor.com" /></label
 						><label>Phone<input name="phone" placeholder="+263 7…" /></label>
 					</div>
-					<fieldset class="vendor-specialty-fieldset"><legend>Specialties</legend><div class="vendor-category-grid">{#each Object.entries(categories) as [key, label] (key)}<label class="checkbox-label"><input name="specialties" type="checkbox" value={key} /> {label}</label>{/each}</div></fieldset>
+					<fieldset class="vendor-specialty-fieldset">
+						<legend>Specialties</legend>
+						<div class="vendor-category-grid">
+							{#each Object.entries(categories) as [key, label] (key)}<label class="checkbox-label"
+									><input name="specialties" type="checkbox" value={key} /> {label}</label
+								>{/each}
+						</div>
+					</fieldset>
 					<div class="form-grid two">
 						<label
 							>Hourly rate ({data.organization.currency_code})<input
@@ -715,28 +993,126 @@
 					</div>
 				</div>
 				<div class="filters vendor-filters">
-					<input aria-label="Search maintenance resources" placeholder="Search resources" bind:value={vendorSearch} oninput={() => (vendorPage = 1)} />
-					<select aria-label="Filter resource type" bind:value={vendorFilter} onchange={() => (vendorPage = 1)}><option value="all">All resources</option><option value="internal">Internal team</option><option value="external">External vendors</option></select>
-					<select aria-label="Filter resource status" bind:value={vendorStatusFilter} onchange={() => (vendorPage = 1)}><option value="all">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select>
-					<select aria-label="Filter specialty" bind:value={vendorSpecialtyFilter} onchange={() => (vendorPage = 1)}><option value="all">All specialties</option>{#each specialtyOptions as specialty (specialty)}<option value={specialty}>{specialty}</option>{/each}</select>
+					<input
+						aria-label="Search maintenance resources"
+						placeholder="Search resources"
+						bind:value={vendorSearch}
+						oninput={() => (vendorPage = 1)}
+					/>
+					<select
+						aria-label="Filter resource type"
+						bind:value={vendorFilter}
+						onchange={() => (vendorPage = 1)}
+						><option value="all">All resources</option><option value="internal"
+							>Internal team</option
+						><option value="external">External vendors</option></select
+					>
+					<select
+						aria-label="Filter resource status"
+						bind:value={vendorStatusFilter}
+						onchange={() => (vendorPage = 1)}
+						><option value="all">All statuses</option><option value="active">Active</option><option
+							value="inactive">Inactive</option
+						></select
+					>
+					<select
+						aria-label="Filter specialty"
+						bind:value={vendorSpecialtyFilter}
+						onchange={() => (vendorPage = 1)}
+						><option value="all">All specialties</option
+						>{#each specialtyOptions as specialty (specialty)}<option value={specialty}
+								>{specialty}</option
+							>{/each}</select
+					>
 				</div>
 				{#if visibleVendors.length > 0}<div class="vendor-table-wrap">
-					<table class="system-table vendor-table">
-						<thead><tr><th>Resource</th><th>Type</th><th>Specialties</th><th>Contact</th><th>Status</th><th>Actions</th></tr></thead>
-						<tbody>{#each pagedVendors as vendor (vendor.id)}<tr>
-							<td><strong>{vendor.business_name}</strong><small>{vendor.contact_name || 'No contact name'}</small></td>
-							<td><span class="tag resource-type">{vendor.resource_type === 'internal' ? 'Internal team' : 'External vendor'}</span></td>
-							<td>{(vendor.specialties ?? []).join(', ') || 'General maintenance'}</td>
-							<td>{vendor.phone || vendor.email || 'No contact details'}</td>
-							<td><span class="tag status">{vendor.status === 'active' ? 'Active' : 'Inactive'}</span>{#if vendor.emergency_available}<small class="table-note">Emergency ready</small>{/if}</td>
-							<td><form method="POST" action="?/updateMaintenanceVendor" class="vendor-status-form"><input type="hidden" name="vendor_id" value={vendor.id} /><select name="status" aria-label={`Status for ${vendor.business_name}`}><option value="active" selected={vendor.status === 'active'}>Active</option><option value="inactive" selected={vendor.status === 'inactive'}>Inactive</option></select><button class="text-link" type="submit">Save</button></form></td>
-						</tr>{/each}</tbody>
-					</table>
-					<div class="pagination"><small>Showing {(effectiveVendorPage - 1) * 10 + 1}–{Math.min(effectiveVendorPage * 10, visibleVendors.length)} of {visibleVendors.length}</small><div><button class="secondary" type="button" disabled={effectiveVendorPage === 1} onclick={() => (vendorPage = Math.max(1, effectiveVendorPage - 1))}>Previous</button><span>Page {effectiveVendorPage} of {vendorPageCount}</span><button class="secondary" type="button" disabled={effectiveVendorPage === vendorPageCount} onclick={() => (vendorPage = Math.min(vendorPageCount, effectiveVendorPage + 1))}>Next</button></div></div>
-				</div>{/if}
+						<table class="system-table vendor-table">
+							<thead
+								><tr
+									><th>Resource</th><th>Type</th><th>Specialties</th><th>Contact</th><th>Status</th
+									><th>Actions</th></tr
+								></thead
+							>
+							<tbody
+								>{#each pagedVendors as vendor (vendor.id)}<tr>
+										<td
+											><strong>{vendor.business_name}</strong><small
+												>{vendor.contact_name || 'No contact name'}</small
+											></td
+										>
+										<td
+											><span class="tag resource-type"
+												>{vendor.resource_type === 'internal'
+													? 'Internal team'
+													: 'External vendor'}</span
+											></td
+										>
+										<td>{(vendor.specialties ?? []).join(', ') || 'General maintenance'}</td>
+										<td>{vendor.phone || vendor.email || 'No contact details'}</td>
+										<td
+											><span class="tag status"
+												>{vendor.status === 'active' ? 'Active' : 'Inactive'}</span
+											>{#if vendor.emergency_available}<small class="table-note"
+													>Emergency ready</small
+												>{/if}</td
+										>
+										<td
+											><form
+												data-managed-feedback="true"
+												use:enhance={workspaceSubmit}
+												method="POST"
+												action="?/updateMaintenanceVendor"
+												class="vendor-status-form"
+											>
+												<input type="hidden" name="vendor_id" value={vendor.id} /><select
+													name="status"
+													aria-label={`Status for ${vendor.business_name}`}
+													><option value="active" selected={vendor.status === 'active'}
+														>Active</option
+													><option value="inactive" selected={vendor.status === 'inactive'}
+														>Inactive</option
+													></select
+												><button class="text-link" type="submit">Save</button>
+											</form></td
+										>
+									</tr>{/each}</tbody
+							>
+						</table>
+						<div class="pagination">
+							<small
+								>Showing {(effectiveVendorPage - 1) * 10 + 1}–{Math.min(
+									effectiveVendorPage * 10,
+									visibleVendors.length
+								)} of {visibleVendors.length}</small
+							>
+							<div>
+								<button
+									class="secondary"
+									type="button"
+									disabled={effectiveVendorPage === 1}
+									onclick={() => (vendorPage = Math.max(1, effectiveVendorPage - 1))}
+									>Previous</button
+								><span>Page {effectiveVendorPage} of {vendorPageCount}</span><button
+									class="secondary"
+									type="button"
+									disabled={effectiveVendorPage === vendorPageCount}
+									onclick={() => (vendorPage = Math.min(vendorPageCount, effectiveVendorPage + 1))}
+									>Next</button
+								>
+							</div>
+						</div>
+					</div>{/if}
 				{#if visibleVendors.length === 0}<div class="empty compact">
-						<strong>{data.maintenanceVendors.length === 0 ? 'No maintenance resources yet.' : 'No resources match these filters.'}</strong>
-						<p>{data.maintenanceVendors.length === 0 ? 'Add an internal team or external contractor to make assignment easier.' : 'Try clearing a filter or searching for another resource.'}</p>
+						<strong
+							>{data.maintenanceVendors.length === 0
+								? 'No maintenance resources yet.'
+								: 'No resources match these filters.'}</strong
+						>
+						<p>
+							{data.maintenanceVendors.length === 0
+								? 'Add an internal team or external contractor to make assignment easier.'
+								: 'Try clearing a filter or searching for another resource.'}
+						</p>
 					</div>{:else}<div class="vendor-list resource-directory-old">
 						{#each visibleVendors as vendor (vendor.id)}<article class="vendor-row">
 								<div class="vendor-mark">{vendor.business_name.slice(0, 1).toUpperCase()}</div>
@@ -752,10 +1128,19 @@
 									</div>
 								</div>
 								<div class="vendor-side">
-									<span class="tag resource-type">{vendor.resource_type === 'internal' ? 'Internal team' : 'External vendor'}</span>
+									<span class="tag resource-type"
+										>{vendor.resource_type === 'internal'
+											? 'Internal team'
+											: 'External vendor'}</span
+									>
 									{#if vendor.emergency_available}<span class="tag status">Emergency ready</span
 										>{/if}
-									<form method="POST" action="?/updateMaintenanceVendor">
+									<form
+										data-managed-feedback="true"
+										use:enhance={workspaceSubmit}
+										method="POST"
+										action="?/updateMaintenanceVendor"
+									>
 										<input type="hidden" name="vendor_id" value={vendor.id} /><select
 											name="status"
 											aria-label="Vendor status"
@@ -780,14 +1165,26 @@
 						Set a recurring plan once, then generate a traceable work order when it becomes due.
 					</p>
 				</div>
-				<form method="POST" action="?/generatePreventiveWork">
+				<form
+					data-managed-feedback="true"
+					use:enhance={workspaceSubmit}
+					method="POST"
+					action="?/generatePreventiveWork"
+				>
 					<button class="primary" type="submit"
 						>Generate due work ({duePlans.length}) <span>→</span></button
 					>
 				</form>
 			</div>
 			<div class="maintenance-grid">
-				<form method="POST" action="?/createMaintenancePlan" class="form-stack">
+				<form
+					data-managed-feedback="true"
+					use:enhance={workspaceSubmit}
+					method="POST"
+					action="?/createMaintenancePlan"
+					data-reset-on-success="true"
+					class="form-stack"
+				>
 					<div class="form-grid two">
 						<label
 							>Plan title<input
@@ -888,7 +1285,12 @@
 									class:overdue={plan.next_due_on <= new Date().toISOString().slice(0, 10)}
 									class="due-label">{plan.active ? dateLabel(plan.next_due_on) : 'Paused'}</span
 								>
-								<form method="POST" action="?/generatePreventiveWork">
+								<form
+									data-managed-feedback="true"
+									use:enhance={workspaceSubmit}
+									method="POST"
+									action="?/generatePreventiveWork"
+								>
 									<input type="hidden" name="plan_id" value={plan.id} /><button
 										class="text-link"
 										type="submit">Generate →</button
@@ -909,7 +1311,12 @@
 						is safe to run repeatedly.
 					</p>
 				</div>
-				<form method="POST" action="?/runMaintenanceSlaCheck">
+				<form
+					data-managed-feedback="true"
+					use:enhance={workspaceSubmit}
+					method="POST"
+					action="?/runMaintenanceSlaCheck"
+				>
 					<button class="primary" type="submit">Run SLA check <span>→</span></button>
 				</form>
 			</div>
@@ -960,7 +1367,12 @@
 							<span class="tag priority {reminder.reminder_type === 'overdue' ? 'urgent' : 'high'}"
 								>{reminderLabel(reminder.reminder_type)}</span
 							><span class="muted">Target {dateLabel(reminder.due_at)}</span>
-							<form method="POST" action="?/acknowledgeMaintenanceReminder">
+							<form
+								data-managed-feedback="true"
+								use:enhance={workspaceSubmit}
+								method="POST"
+								action="?/acknowledgeMaintenanceReminder"
+							>
 								<input type="hidden" name="reminder_id" value={reminder.id} /><button
 									class="text-link"
 									type="submit">Acknowledge</button
@@ -2112,6 +2524,480 @@
 		.update-preview {
 			align-items: start;
 			grid-template-columns: 1fr;
+		}
+	}
+	.maintenance-shell {
+		color: #294334;
+		gap: 22px;
+	}
+	.maintenance-shell * {
+		box-sizing: border-box;
+	}
+	.maintenance-intro {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 25px;
+	}
+	.maintenance-intro h1 {
+		font-size: clamp(28px, 2.8vw, 40px);
+		font-weight: 500;
+		letter-spacing: -1.4px;
+		line-height: 1.2;
+		color: #294334;
+		margin: 0 0 12px;
+	}
+	.maintenance-intro h1 em {
+		font-family: Georgia, serif;
+		font-weight: 400;
+	}
+	.maintenance-intro > div > p:last-child {
+		font-size: 11px;
+		color: #879b73;
+		line-height: 1.8;
+		margin: 0;
+	}
+	.eyebrow {
+		font-size: 8px;
+		font-weight: 500;
+		letter-spacing: 1.6px;
+		color: #8a9e76;
+		margin-bottom: 12px;
+	}
+	.maintenance-nav {
+		background: #e9eedf;
+		border-color: #dce5cf;
+		border-radius: 9px;
+		padding: 5px;
+		display: block;
+	}
+	.maintenance-nav > div:first-child {
+		display: none;
+	}
+	.tabs {
+		gap: 4px;
+		flex-wrap: nowrap;
+		overflow-x: auto;
+		scrollbar-width: thin;
+	}
+	.tabs button,
+	.tabs a {
+		font-size: 10px;
+		font-weight: 500;
+		padding: 12px 16px;
+		border-radius: 6px;
+		color: #81976a;
+		white-space: nowrap;
+	}
+	.tabs button.active {
+		background: #fffefa;
+		color: #456536;
+		box-shadow: 0 3px 8px #29433408;
+	}
+	.operations-filter {
+		display: flex;
+		align-items: end;
+		gap: 12px;
+		background: #edf1e5;
+		padding: 17px 20px;
+		border: 1px solid #dfe6d3;
+		border-radius: 10px;
+	}
+	.operations-filter label {
+		display: grid;
+		gap: 9px;
+		flex: 1;
+		min-width: 0;
+	}
+	.operations-filter .wide-search {
+		flex: 1.6;
+	}
+	.operations-filter label > span {
+		font-size: 8px;
+		color: #8da178;
+	}
+	.operations-filter input,
+	.operations-filter select {
+		font: inherit;
+		font-size: 10px;
+		border: 1px solid #d9e3cb;
+		background: #fffefa;
+		padding: 11px 10px;
+		border-radius: 5px;
+		color: #67804f;
+		min-width: 0;
+		width: 100%;
+	}
+	.operations-filter > button {
+		font: inherit;
+		font-size: 9px;
+		color: #7e9567;
+		border: 0;
+		background: none;
+		padding: 13px 5px;
+		cursor: pointer;
+	}
+	.operations-scope {
+		font-size: 9px;
+		color: #9ba98c;
+		line-height: 1.8;
+		margin: -10px 0 0;
+	}
+	.primary,
+	.secondary {
+		font-size: 11px;
+		font-weight: 500;
+		border-radius: 6px;
+		padding: 12px 17px;
+	}
+	.primary {
+		background: #294c38;
+		color: #fffefa;
+	}
+	.secondary {
+		background: #edf2e4;
+		color: #729255;
+		border-color: #d7e3c9;
+	}
+	.metric-card {
+		padding: 22px 20px;
+		background: #fffefa;
+		border-color: #dce5cf;
+		border-radius: 12px;
+		min-height: 140px;
+	}
+	.metric-card.dark {
+		background: #294c38;
+		border-color: #294c38;
+	}
+	.metric-card > span,
+	.metric-card small {
+		font-size: 9px;
+		color: #8a9e75;
+		line-height: 1.7;
+	}
+	.metric-card strong {
+		font-size: 30px;
+		font-weight: 500;
+		letter-spacing: -1px;
+		margin: 14px 0 8px;
+	}
+	.metric-card.dark > span,
+	.metric-card.dark small {
+		color: #bdcfaa;
+	}
+	.panel {
+		background: #fffefa;
+		border-color: #dfe6d3;
+		border-radius: 12px;
+		padding: 25px;
+	}
+	.panel-heading h2 {
+		font-size: 20px;
+		font-weight: 500;
+		line-height: 1.35;
+		letter-spacing: -0.7px;
+		color: #3e5e32;
+	}
+	.panel-heading p:not(.eyebrow) {
+		font-size: 11px;
+		color: #8e9e7d;
+		line-height: 1.9;
+	}
+	.text-link {
+		font-size: 10px;
+		color: #78965c;
+	}
+	.maintenance-grid {
+		gap: 18px;
+	}
+	.pulse-row {
+		width: 100%;
+		border: 0;
+		border-top: 1px solid #e4ebd9;
+		background: transparent;
+		text-align: left;
+		font: inherit;
+		cursor: pointer;
+		padding: 18px 0;
+	}
+	.pulse-row:hover {
+		background: #f3f7eb;
+	}
+	.pulse-main strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #5b7945;
+	}
+	.pulse-main small {
+		font-size: 9px;
+		color: #98a986;
+		line-height: 1.8;
+	}
+	.tag {
+		font-size: 8px;
+		font-weight: 500;
+		border-radius: 5px;
+		background: #edf2e4;
+		color: #849d6c;
+		padding: 7px 9px;
+	}
+	.category-line span {
+		font-size: 11px;
+		color: #89a16e;
+	}
+	.category-line strong {
+		font-size: 11px;
+		font-weight: 500;
+		color: #67844f;
+	}
+	.bar {
+		height: 5px;
+		background: #e9efdf;
+	}
+	.bar i {
+		background: #93af75;
+	}
+	.tracker-head {
+		font-size: 8px;
+		font-weight: 500;
+		background: #eef3e6;
+		color: #8fa67a;
+	}
+	.tracker-row {
+		font-size: 11px;
+		border-color: #e4ecda;
+		padding: 18px 12px;
+	}
+	.tracker-row strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #65804e;
+	}
+	.tracker-row small {
+		font-size: 9px;
+		color: #9aac87;
+		line-height: 1.8;
+	}
+	.system-table th {
+		font-size: 9px;
+		font-weight: 500;
+		background: #edf2e4;
+		color: #859e70;
+		border-color: #dfe8d3;
+		padding: 15px;
+	}
+	.system-table td {
+		font-size: 10px;
+		color: #809b68;
+		border-color: #e5edda;
+		padding: 18px 14px;
+	}
+	.system-table td strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #65824c;
+	}
+	.system-table td small,
+	.system-table td p {
+		font-size: 9px;
+		color: #9bad86;
+		line-height: 1.8;
+	}
+	.form-stack label,
+	.form-grid label,
+	.task-plan-form label {
+		font-size: 11px;
+		font-weight: 500;
+		color: #799560;
+		line-height: 1.6;
+	}
+	.form-stack input,
+	.form-stack select,
+	.form-stack textarea,
+	.form-grid input,
+	.form-grid select,
+	.task-plan-form input,
+	.task-plan-form select {
+		font-size: 12px;
+		background: #fffefa;
+		border-color: #dce7ce;
+		border-radius: 5px;
+		color: #6b8952;
+		padding: 12px;
+	}
+	.planned-task {
+		background: #fffefa;
+		border: 1px solid #dce6d1;
+		border-radius: 10px;
+		padding: 0;
+		overflow: hidden;
+	}
+	.planned-task summary {
+		padding: 20px;
+		cursor: pointer;
+		list-style-position: inside;
+	}
+	.planned-task[open] {
+		border-color: #bdcfaa;
+		box-shadow: 0 4px 18px #29433408;
+	}
+	.planned-task form {
+		margin: 0 20px 20px;
+		padding-top: 20px;
+		border-top: 1px solid #e2ead7;
+	}
+	.planned-row strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #5b7944;
+	}
+	.planned-row small {
+		font-size: 9px;
+		color: #98ac83;
+		line-height: 1.8;
+	}
+	.date-block {
+		background: #eaf1df;
+		color: #819e68;
+		border-radius: 8px;
+	}
+	.date-block strong {
+		font-size: 22px;
+		font-weight: 500;
+	}
+	.task-plan-form label {
+		min-width: 0;
+	}
+	.task-start-form small {
+		font-size: 10px;
+		color: #9bad86;
+		line-height: 1.8;
+	}
+	.history-row {
+		border-color: #e1ead6;
+	}
+	.history-row strong {
+		font-size: 12px;
+		font-weight: 500;
+		color: #65824c;
+	}
+	.history-row small {
+		font-size: 9px;
+		color: #9bad86;
+	}
+	.empty {
+		background: #f8faf2;
+		border-color: #dce7cf;
+		border-radius: 10px;
+		padding: 30px;
+	}
+	.empty strong {
+		font-size: 13px;
+		font-weight: 500;
+		color: #6c8a53;
+	}
+	.empty p {
+		font-size: 11px;
+		line-height: 1.9;
+		color: #9bac88;
+	}
+	.count {
+		font-size: 9px;
+		background: #edf3e4;
+		color: #849e6c;
+	}
+	.maintenance-shell button:focus-visible,
+	.maintenance-shell summary:focus-visible,
+	.maintenance-shell input:focus-visible,
+	.maintenance-shell select:focus-visible {
+		outline: 2px solid #95ad79;
+		outline-offset: 3px;
+	}
+	:global(form[aria-busy='true']) {
+		opacity: 0.7;
+		cursor: wait;
+	}
+	:global(form[aria-busy='true']) button {
+		cursor: wait;
+	}
+	@media (max-width: 1150px) {
+		.operations-filter {
+			flex-wrap: wrap;
+		}
+		.operations-filter .wide-search {
+			flex-basis: 100%;
+		}
+		.operations-filter label {
+			flex-basis: 25%;
+		}
+	}
+	@media (max-width: 760px) {
+		.maintenance-intro {
+			align-items: start;
+			flex-direction: column;
+		}
+		.metric-row {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.operations-filter label {
+			flex-basis: 40%;
+		}
+		.panel {
+			padding: 20px 16px;
+		}
+		.planned-task summary {
+			padding: 17px;
+		}
+		.planned-task form {
+			margin: 0 16px 17px;
+		}
+		.planned-row {
+			flex-wrap: wrap;
+			gap: 12px;
+		}
+	}
+	@media (max-width: 500px) {
+		.maintenance-intro h1 {
+			font-size: 31px;
+		}
+		.metric-row {
+			gap: 10px;
+		}
+		.metric-card {
+			padding: 18px 14px;
+			min-height: 135px;
+		}
+		.metric-card strong {
+			font-size: 26px;
+		}
+		.operations-filter {
+			padding: 16px;
+			gap: 15px 10px;
+		}
+		.tabs button,
+		.tabs a {
+			font-size: 10px;
+			padding: 12px;
+		}
+		.pulse-row {
+			gap: 10px;
+			flex-wrap: wrap;
+		}
+		.pulse-main {
+			flex-basis: 70%;
+		}
+		.task-plan-form {
+			display: grid;
+			grid-template-columns: 1fr;
+		}
+		.operations-scope {
+			font-size: 9px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.maintenance-shell * {
+			transition: none !important;
 		}
 	}
 </style>

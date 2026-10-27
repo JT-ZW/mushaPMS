@@ -1,260 +1,512 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { resolve } from '$app/paths';
-
+	import BrandLogo from '$lib/components/BrandLogo.svelte';
 	let { form } = $props();
 	let showPassword = $state(false);
 </script>
 
-<svelte:head><title>Sign in · Musha PMS</title></svelte:head>
-
+<svelte:head
+	><title>Welcome back — Musha PMS</title><meta
+		name="description"
+		content="Sign in to your Musha property management workspace."
+	/><meta name="robots" content="noindex" /></svelte:head
+>
 <main class="login-shell">
-	<section class="login-card">
-		<a class="brand" href={resolve('/')}
-			><img class="musha-logo" src="/logo.png" alt="Musha Property Management System" /><span
-				><strong>Musha</strong><small>Property management</small></span
-			></a
-		>
-		<div class="intro">
-			<p class="eyebrow">Secure access</p>
-			<h1>Welcome back<span>.</span></h1>
-			<p>Sign in to your Musha workspace or platform administration console.</p>
-		</div>
-		{#if form?.message}<div class="error">{form.message}</div>{/if}
-		<form method="POST">
-			<label>Email address<input type="email" name="email" autocomplete="email" required /></label>
-			<label
-				>Password
-				<span class="password-field">
-					<input
-						type={showPassword ? 'text' : 'password'}
-						name="password"
-						autocomplete="current-password"
+	<section class="access-pane" aria-labelledby="login-title">
+		<header class="access-header">
+			<BrandLogo variant="auth" /><a class="back-link" href={resolve('/')}
+				>Back to website <span>↗</span></a
+			>
+		</header>
+		<div class="login-content">
+			<p class="eyebrow">YOUR MUSHA WORKSPACE</p>
+			<h1 id="login-title">Welcome <em>back.</em></h1>
+			<p class="intro-copy">
+				A clearer day starts here. Sign in to bring your properties, people and everyday work into
+				view.
+			</p>
+			{#if form?.message}<div class="error" id="signin-error" role="alert">{form.message}</div>{/if}
+			<form method="POST" aria-label="Sign in to Musha">
+				<div class="field">
+					<label for="email">Email address</label><input
+						id="email"
+						type="email"
+						name="email"
+						placeholder="you@yourcompany.com"
+						autocomplete="username"
 						required
+						aria-invalid={form?.message ? 'true' : undefined}
+						aria-describedby={form?.message ? 'signin-error' : undefined}
 					/>
-					<button
-						class="visibility-toggle"
-						type="button"
-						aria-label={showPassword ? 'Hide password' : 'Show password'}
-						aria-pressed={showPassword}
-						onclick={() => (showPassword = !showPassword)}
+				</div>
+				<div class="field">
+					<label for="password">Password</label>
+					<div class="password-field">
+						<input
+							id="password"
+							type={showPassword ? 'text' : 'password'}
+							name="password"
+							placeholder="Enter your password"
+							autocomplete="current-password"
+							required
+							aria-invalid={form?.message ? 'true' : undefined}
+							aria-describedby={form?.message ? 'signin-error' : undefined}
+						/><button
+							class="visibility-toggle"
+							type="button"
+							aria-label={showPassword ? 'Hide password' : 'Show password'}
+							aria-pressed={showPassword}
+							aria-controls="password"
+							onclick={() => (showPassword = !showPassword)}
+							>{showPassword ? 'Hide' : 'Show'}</button
+						>
+					</div>
+				</div>
+				<div class="form-footer">
+					<span>YOUR PERSONAL WORKSPACE</span><a href={resolve('/forgot-password')}
+						>Forgot password?</a
 					>
-						{#if showPassword}
-							<svg viewBox="0 0 24 24" aria-hidden="true"
-								><path
-									d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A10.8 10.8 0 0 1 12 5c5.2 0 8.6 4.6 9.7 7a15.7 15.7 0 0 1-3.1 4.1M6.1 6.1C3.9 7.5 2.6 9.6 2.3 12c.6 1.3 1.8 3.1 3.7 4.6A9.6 9.6 0 0 0 12 19c1.1 0 2.1-.2 3-.5"
-								/></svg
-							>
-						{:else}
-							<svg viewBox="0 0 24 24" aria-hidden="true"
-								><path
-									d="M2.3 12C3.4 9.6 6.8 5 12 5s8.6 4.6 9.7 7c-1.1 2.4-4.5 7-9.7 7S3.4 14.4 2.3 12Z"
-								/><circle cx="12" cy="12" r="2.6" /></svg
-							>
-						{/if}
-					</button>
-				</span>
-			</label>
-			<div class="form-footer">
-				<a href={resolve('/forgot-password')}>Forgot password?</a>
+				</div>
+				<button class="submit-button" type="submit" data-loading-text="Signing in…"
+					>Sign in to Musha <span aria-hidden="true">↗</span></button
+				>
+			</form>
+			<div class="access-note">
+				<span class="note-rule"></span>
+				<p>New to Musha? <a href={resolve('/contact')}>Let’s talk about your portfolio ↗</a></p>
+				<small>Access is personally arranged for each organization.</small>
 			</div>
-			<button type="submit">Sign in <span>→</span></button>
-		</form>
-		<p class="note">Accounts are provisioned by the Musha platform administrator.</p>
+		</div>
+		<footer class="access-footer">
+			<span>© {new Date().getFullYear()} Musha PMS</span><span
+				>Properties. People. Possibilities.</span
+			>
+		</footer>
 	</section>
+	<aside class="visual-pane" aria-label="The Musha perspective">
+		<img
+			src="/images/musha-architecture.jpg"
+			alt="A contemporary residence with warmly lit living spaces and a landscaped garden"
+			width="1400"
+			height="933"
+			fetchpriority="high"
+		/>
+		<div class="visual-overlay"></div>
+		<div class="visual-top">
+			<span>THE MUSHA PERSPECTIVE</span><span>01 / A BETTER EVERYDAY</span>
+		</div>
+		<div class="visual-copy">
+			<p>THOUGHTFULLY BUILT. FOR THE WAY YOU MANAGE.</p>
+			<h2>Exceptional places.<br /><em>Beautifully managed.</em></h2>
+			<div class="visual-line"></div>
+			<p class="visual-description">A better home for the work<br />behind your properties.</p>
+		</div>
+		<div class="visual-foot">
+			<span>BUILT IN ZIMBABWE. BUILT AROUND YOU.</span><span aria-hidden="true">↗</span>
+		</div>
+	</aside>
 </main>
 
 <style>
-	:global(*) {
-		box-sizing: border-box;
-	}
-	:global(body) {
-		margin: 0;
-		background: #f7f8f5;
-		color: var(--musha-ink);
+	.login-shell {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		min-height: 100svh;
+		background: #f5f3ed;
+		color: #203d32;
 		font-family: var(--font-body);
 	}
-	.login-shell {
-		min-height: 100vh;
-		display: grid;
-		place-items: center;
-		padding: 25px;
-		background: radial-gradient(circle at 80% 10%, #e5efcf 0, transparent 35%), #f7f8f5;
+	.login-shell * {
+		box-sizing: border-box;
 	}
-	.login-card {
-		width: min(100%, 390px);
-		padding: 42px;
-		border: 1px solid #e2ebe2;
-		border-radius: 14px;
-		background: #fff;
-		box-shadow: 0 24px 60px #315c4610;
+	.access-pane {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		padding: 24px 8% 22px;
 	}
-	.brand {
+	.access-header {
 		display: flex;
 		align-items: center;
-		gap: 10px;
-		color: var(--musha-ink);
+		justify-content: space-between;
+		gap: 25px;
+	}
+	.back-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 17px;
+		font-size: 11px;
 		text-decoration: none;
+		color: #64725d;
 	}
-	.brand strong,
-	.brand small {
-		display: block;
+	.back-link span {
+		font-size: 18px;
 	}
-	.brand strong {
-		font-size: 19px;
-		letter-spacing: -0.04em;
-	}
-	.brand small {
-		color: #83988d;
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.12em;
-		margin-top: 3px;
-	}
-	.intro {
-		margin: 56px 0 25px;
+	.login-content {
+		width: 100%;
+		max-width: 390px;
+		margin: auto;
+		padding: 50px 0;
 	}
 	.eyebrow {
-		color: #7b9588;
-		font-size: 11px;
-		font-weight: 700;
-		letter-spacing: 0.16em;
-		margin: 0 0 9px;
-		text-transform: uppercase;
+		font-size: 9px;
+		letter-spacing: 2px;
+		color: #738064;
+		font-weight: 600;
+		margin: 0 0 23px;
 	}
-	.intro h1 {
-		font-size: 40px;
-		letter-spacing: -0.08em;
-		line-height: 0.95;
-		margin: 0 0 15px;
+	h1 {
+		font-weight: 400;
+		font-size: clamp(42px, 3.7vw, 60px);
+		line-height: 1.1;
+		letter-spacing: -2.8px;
+		margin: 0 0 22px;
 	}
-	.intro h1 span {
-		color: var(--musha-lime);
+	h1 em,
+	h2 em {
+		font-family: Georgia, 'Times New Roman', serif;
+		font-weight: 400;
 	}
-	.intro p:not(.eyebrow) {
-		color: #7b9186;
-		font-size: 14px;
-		line-height: 1.6;
-		margin: 0;
+	.intro-copy {
+		font-size: 13px;
+		line-height: 1.9;
+		color: #6e7867;
+		margin: 0 0 34px;
+		max-width: 365px;
 	}
-	.login-card form {
+	form {
 		display: grid;
-		gap: 15px;
+		gap: 22px;
 	}
-	.login-card label {
+	.field {
 		display: grid;
-		gap: 6px;
-		color: #567366;
+		gap: 10px;
+	}
+	.field label {
 		font-size: 12px;
-		font-weight: 700;
+		font-weight: 500;
+		color: #3b4e3a;
 	}
-	.login-card input {
+	input {
 		width: 100%;
-		border: 1px solid #dfe9e1;
-		border-radius: 6px;
-		padding: 11px;
-		color: var(--musha-ink);
-		outline: none;
+		height: 54px;
+		border: 1px solid #d7dccd;
+		border-radius: 3px;
+		padding: 14px 16px;
+		background: #fffef9;
+		color: #203d32;
+		font-size: 14px;
+		transition:
+			border-color 0.2s,
+			box-shadow 0.2s;
 	}
-	.login-card input:focus {
-		border-color: #8eb898;
-		box-shadow: 0 0 0 3px #eef7ee;
+	input::placeholder {
+		color: #929889;
+		font-size: 12px;
+	}
+	input:focus {
+		outline: none;
+		border-color: #7f9667;
+		box-shadow: 0 0 0 3px #dce5cf;
 	}
 	.password-field {
 		position: relative;
-		display: block;
 	}
 	.password-field input {
-		padding-right: 42px;
+		padding-right: 65px;
 	}
 	.visibility-toggle {
 		position: absolute;
-		top: 50%;
-		right: 9px;
-		width: 28px;
-		height: 28px;
-		margin: 0;
-		padding: 5px;
-		transform: translateY(-50%);
-		border: 0 !important;
-		border-radius: 5px !important;
-		background: transparent !important;
-		color: #789287 !important;
-		box-shadow: none !important;
+		right: 7px;
+		top: 7px;
+		min-width: 48px;
+		min-height: 40px;
+		background: transparent;
+		border: 0;
+		font: inherit;
+		font-size: 11px;
+		color: #566b48;
+		cursor: pointer;
+		border-radius: 2px;
 	}
-	.visibility-toggle:hover,
-	.visibility-toggle:focus-visible {
-		background: #eef5e9 !important;
-		color: var(--musha-deep) !important;
-	}
-	.visibility-toggle svg {
-		width: 17px;
-		height: 17px;
-		fill: none;
-		stroke: currentColor;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-		stroke-width: 1.7;
+	.visibility-toggle:hover {
+		background: #e9eddf;
 	}
 	.form-footer {
 		display: flex;
-		justify-content: flex-end;
-		margin-top: -5px;
+		align-items: center;
+		justify-content: space-between;
+		gap: 15px;
+		margin-top: -7px;
+	}
+	.form-footer > span {
+		font-size: 7px;
+		letter-spacing: 1.2px;
+		color: #839075;
 	}
 	.form-footer a {
-		color: #668b73;
-		font-size: 12px;
-		font-weight: 700;
+		font-size: 11px;
+		color: #48603c;
 		text-decoration: none;
 	}
 	.form-footer a:hover {
-		color: var(--musha-deep);
 		text-decoration: underline;
-		text-underline-offset: 3px;
+		text-underline-offset: 4px;
 	}
-	.login-card form > button[type='submit'] {
-		margin-top: 7px;
-		border: 0;
-		border-radius: 7px;
-		background: var(--musha-deep);
+	.submit-button {
+		margin-top: 5px;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 15px;
+		width: 100%;
+		min-height: 56px;
+		padding: 16px 20px;
+		background: #203d32;
 		color: #fff;
-		padding: 12px;
-		font-size: 13px;
-		font-weight: 700;
+		border: 0;
+		border-radius: 2px;
+		font: inherit;
+		font-size: 12px;
+		font-weight: 500;
 		cursor: pointer;
+		transition:
+			background 0.2s,
+			transform 0.2s;
 	}
-	.login-card button span {
-		color: var(--musha-lime);
-		margin-left: 15px;
-		font-size: 16px;
+	.submit-button > span {
+		font-size: 23px;
+		color: #d6e8ae;
+		line-height: 1;
 	}
-	.note {
-		color: #a0ada5;
-		font-size: 11px;
-		line-height: 1.5;
-		margin: 19px 0 0;
-		text-align: center;
+	.submit-button:hover {
+		background: #355542;
+		transform: translateY(-2px);
+	}
+	.submit-button:disabled {
+		opacity: 0.7;
+		cursor: wait;
+		transform: none;
+	}
+	.access-note {
+		margin-top: 30px;
+	}
+	.note-rule {
+		display: block;
+		width: 32px;
+		height: 1px;
+		background: #bbc5ac;
+		margin-bottom: 19px;
+	}
+	.access-note p {
+		font-size: 10px;
+		line-height: 1.8;
+		color: #79836e;
+		margin: 0 0 6px;
+	}
+	.access-note a {
+		color: #49603c;
+		text-decoration: none;
+		border-bottom: 1px solid #b7c1a5;
+		padding-bottom: 2px;
+	}
+	.access-note small {
+		font-size: 9px;
+		color: #849077;
+		line-height: 1.7;
+	}
+	.access-footer {
+		display: flex;
+		justify-content: space-between;
+		gap: 20px;
+		border-top: 1px solid #daddd1;
+		padding-top: 19px;
+		color: #7c8770;
+		font-size: 8px;
+		line-height: 1.6;
 	}
 	.error {
-		background: #fae9e5;
-		color: #9a5548;
-		border-radius: 6px;
-		padding: 10px;
-		margin: -8px 0 15px;
+		border: 1px solid #e3c9be;
+		border-left: 3px solid #a15b42;
+		background: #f9ede5;
+		color: #854631;
+		padding: 13px 15px;
 		font-size: 12px;
+		line-height: 1.7;
+		margin: 0 0 22px;
+		border-radius: 2px;
 	}
-	@media (max-width: 480px) {
+	.visual-pane {
+		position: relative;
+		overflow: hidden;
+		isolation: isolate;
+		background: #203d32;
+		color: #fff;
+		min-height: 100%;
+		display: flex;
+		flex-direction: column;
+		justify-content: end;
+		padding: 35px 7%;
+	}
+	.visual-pane > img,
+	.visual-overlay {
+		position: absolute;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		z-index: -2;
+	}
+	.visual-pane > img {
+		object-position: 48% center;
+		animation: photo-enter 1.5s ease-out both;
+	}
+	.visual-overlay {
+		z-index: -1;
+		background: linear-gradient(180deg, #12281f60, #12281f08 30%, #12281f44 50%, #0e261deb 100%);
+	}
+	.visual-top {
+		position: absolute;
+		top: 39px;
+		left: 7%;
+		right: 7%;
+		display: flex;
+		justify-content: space-between;
+		gap: 20px;
+		font-size: 7px;
+		letter-spacing: 1.6px;
+		color: #edf0e5;
+	}
+	.visual-copy {
+		padding: 160px 0 45px;
+	}
+	.visual-copy > p:first-child {
+		font-size: 7px;
+		letter-spacing: 1.8px;
+		color: #d8e2cf;
+		line-height: 1.8;
+		margin: 0 0 25px;
+	}
+	.visual-copy h2 {
+		font-size: clamp(37px, 3.8vw, 61px);
+		font-weight: 400;
+		line-height: 1.12;
+		letter-spacing: -2px;
+		margin: 0 0 30px;
+	}
+	.visual-copy h2 em {
+		color: #e0e9ca;
+	}
+	.visual-line {
+		width: 48px;
+		height: 1px;
+		background: #c8d3b7;
+		margin: 0 0 23px;
+	}
+	.visual-description {
+		font-size: 12px;
+		line-height: 1.9;
+		color: #d4decc;
+		margin: 0;
+	}
+	.visual-foot {
+		border-top: 1px solid #ffffff40;
+		padding-top: 22px;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 20px;
+		font-size: 7px;
+		letter-spacing: 1.2px;
+		color: #c9d5bf;
+	}
+	.visual-foot > span:last-child {
+		font-size: 24px;
+	}
+	a:focus-visible,
+	button:focus-visible {
+		outline: 2px solid #8c9e70;
+		outline-offset: 5px;
+	}
+	@keyframes photo-enter {
+		from {
+			transform: scale(1.035);
+		}
+		to {
+			transform: scale(1);
+		}
+	}
+	@media (min-width: 1800px) {
+		.access-pane {
+			padding-left: 12%;
+			padding-right: 12%;
+		}
+		.login-content {
+			max-width: 430px;
+		}
+	}
+	@media (max-width: 1000px) {
 		.login-shell {
-			padding: 16px;
+			grid-template-columns: 1.1fr 1fr;
 		}
-		.login-card {
-			padding: 28px 22px;
-			border-radius: 12px;
+		.access-pane {
+			padding: 22px 7%;
 		}
-		.intro {
-			margin-top: 42px;
+		.visual-copy h2 {
+			font-size: 40px;
 		}
-		.intro h1 {
-			font-size: clamp(34px, 11vw, 40px);
+		.visual-top span:last-child {
+			display: none;
+		}
+		.form-footer > span {
+			display: none;
+		}
+		.form-footer {
+			justify-content: end;
+		}
+		.access-footer {
+			font-size: 7px;
+			gap: 12px;
+		}
+	}
+	@media (max-width: 760px) {
+		.login-shell {
+			grid-template-columns: 1fr;
+		}
+		.access-pane {
+			padding: 20px 6%;
+			min-height: 100svh;
+		}
+		.login-content {
+			padding: 45px 0;
+			max-width: 420px;
+		}
+		h1 {
+			font-size: 49px;
+		}
+		.intro-copy {
+			font-size: 13px;
+		}
+		.access-footer {
+			font-size: 8px;
+		}
+		.visual-pane {
+			display: none;
+		}
+		.back-link {
+			font-size: 10px;
+		}
+		.access-note small {
+			font-size: 10px;
+		}
+		.access-note p {
+			font-size: 11px;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.login-shell * {
+			animation: none;
+			transition: none;
 		}
 	}
 </style>
