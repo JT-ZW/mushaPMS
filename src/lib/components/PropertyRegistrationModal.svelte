@@ -2,10 +2,17 @@
 	import { onMount, untrack } from 'svelte';
 	import type { ComponentProps } from 'svelte';
 	import PropertyRegistrationWizard from './PropertyRegistrationWizard.svelte';
-	let { organization, properties, spaces, form, onClose } = $props<
+	let {
+		organization,
+		properties,
+		spaces,
+		modules = [],
+		form,
+		onClose
+	} = $props<
 		Pick<
 			ComponentProps<typeof PropertyRegistrationWizard>,
-			'organization' | 'properties' | 'spaces' | 'form'
+			'organization' | 'properties' | 'spaces' | 'modules' | 'form'
 		> & { onClose: () => void }
 	>();
 	const initialForm = untrack(() => form);
@@ -72,6 +79,7 @@
 	<div class="modal-body" oninput={() => (dirty = true)} onchange={() => (dirty = true)}>
 		<PropertyRegistrationWizard
 			{organization}
+			{modules}
 			{properties}
 			{spaces}
 			form={currentForm}

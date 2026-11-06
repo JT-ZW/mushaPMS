@@ -24,7 +24,7 @@
 		country: string | null;
 		notes: string | null;
 	};
-	type Property = { id: string; name: string; status: string };
+	type Property = { id: string; name: string; status: string; module_key?: string };
 	type Space = {
 		id: string;
 		property_id: string;
@@ -44,6 +44,7 @@
 		deposit_amount: number | string;
 		expected_move_out_on?: string | null;
 		billing_frequency: string;
+		academic_term_id?: string | null;
 		rent_due_day?: number | null;
 		notice_period_days?: number | null;
 		move_in_at?: string | null;
@@ -92,6 +93,7 @@
 		created_at: string;
 	};
 	type WorkspaceData = {
+		academicTerms?: { id: string; name: string }[];
 		organization: { id: string; name: string; currency_code: string; timezone?: string };
 		properties: Property[];
 		spaces: Space[];
@@ -148,6 +150,13 @@
 	let propertyFilter = $state('all');
 	let leaseFilter = $state('all');
 	let onboardingStep = $state(1);
+	let onboardingSpaceId = $state('');
+	const onboardingStudent = $derived(
+		data.properties.find(
+			(p: Property) =>
+				p.id === data.spaces.find((s: Space) => s.id === onboardingSpaceId)?.property_id
+		)?.module_key === 'student'
+	);
 	let onboardingForm = $state<HTMLFormElement>(null!);
 	let onboardingSummary = $state<[string, string][]>([]);
 	let saving = $state(false);
@@ -736,7 +745,7 @@
 						<p class="eyebrow">02 · Accommodation and lease</p>
 						<div class="form-grid two">
 							<label
-								>Rentable space<select name="space_id" required
+								>Rentable space<select name="space_id" bind:value={onboardingSpaceId} required
 									><option value="">Choose space</option
 									>{#each availableSpaces as space (space.id)}<option
 											value={space.id}
@@ -751,7 +760,7 @@
 							><label>Start date<input name="start_date" type="date" required /></label><label
 								>End date<input name="end_date" type="date" /></label
 							><label
-								>Rent ({data.organization.currency_code})<input
+								>Rent per billing period ({data.organization.currency_code})<input
 									name="rent_amount"
 									type="number"
 									min="0"
@@ -791,9 +800,12 @@
 							>
 							<label
 								>Billing frequency<select name="billing_frequency"
-									><option value="monthly">Monthly</option><option value="weekly">Weekly</option
-									><option value="quarterly">Quarterly</option><option value="annual">Annual</option
-									></select
+									><option value="monthly">Monthly</option
+									>{#if onboardingStudent && data.academicTerms?.length}<option value="termly"
+											>Per academic term (student accommodation)</option
+										>{/if}<option value="weekly">Weekly</option><option value="quarterly"
+										>Quarterly</option
+									><option value="annual">Annual</option></select
 								></label
 							><label
 								>Rent due day<input
@@ -803,7 +815,15 @@
 									max="31"
 									placeholder="1"
 								/></label
-							><label
+							>{#if data.academicTerms?.length}<label
+									>Academic term (termly billing only)<select name="academic_term_id"
+										><option value="">Not applicable / monthly</option
+										>{#each data.academicTerms as term (term.id)}<option value={term.id}
+												>{term.name}</option
+											>{/each}</select
+									></label
+								>{/if}
+							<label
 								>Notice period (days)<input
 									name="notice_period_days"
 									type="number"
@@ -1177,7 +1197,11 @@
 									data-managed-feedback="true"
 									class="form-grid four lease-edit"
 								>
-									<input type="hidden" name="tenancy_id" value={tenancy.id} /><label
+									<input type="hidden" name="tenancy_id" value={tenancy.id} /><input
+										type="hidden"
+										name="academic_term_id"
+										value={tenancy.academic_term_id ?? ''}
+									/><label
 										>Status<select name="status"
 											><option value="draft" selected={tenancy.status === 'draft'}>Draft</option
 											><option value="active" selected={tenancy.status === 'active'}>Active</option
@@ -1217,6 +1241,8 @@
 										/></label
 									><label
 										>Frequency<select name="billing_frequency"
+											><option value="termly" selected={tenancy.billing_frequency === 'termly'}
+												>Per academic term</option
 											><option value="monthly" selected={tenancy.billing_frequency === 'monthly'}
 												>Monthly</option
 											><option value="weekly" selected={tenancy.billing_frequency === 'weekly'}

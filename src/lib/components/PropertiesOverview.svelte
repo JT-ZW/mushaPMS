@@ -29,13 +29,15 @@
 		properties,
 		spaces,
 		maintenance = [],
-		onAdd
+		onAdd,
+		canAdd = true
 	} = $props<{
 		organization: { id: string; currency_code: string };
 		properties: Property[];
 		spaces: Space[];
 		maintenance?: Request[];
 		onAdd?: () => void;
+		canAdd?: boolean;
 	}>();
 	let view = $state<'cards' | 'table' | 'map'>('cards');
 	let search = $state('');
@@ -119,6 +121,7 @@
 		</div>
 		<a
 			class="primary"
+			hidden={!canAdd}
 			href={resolve(`/workspace/${organization.id}/new-property`)}
 			onclick={(event) => {
 				if (onAdd) {
@@ -199,6 +202,7 @@
 					: 'Register a property and its spaces to begin.'}
 			</p>
 			{#if properties.length}<button type="button" onclick={clear}>Clear filters</button>{:else}<a
+					hidden={!canAdd}
 					class="primary"
 					href={resolve(`/workspace/${organization.id}/new-property`)}
 					onclick={(event) => {

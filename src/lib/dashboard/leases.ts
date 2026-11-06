@@ -30,7 +30,7 @@ export function validateLeaseTerms(
 	if (!validDate(start)) return 'Enter a valid lease start date.';
 	if (end && (!validDate(end) || end < start))
 		return 'The end date must be on or after the start date.';
-	if (!['monthly', 'weekly', 'quarterly', 'annual', 'custom'].includes(frequency))
+	if (!['monthly', 'weekly', 'quarterly', 'annual', 'custom', 'termly'].includes(frequency))
 		return 'Choose a valid billing frequency.';
 	if (due !== null && (!Number.isInteger(due) || due < 1 || due > 31))
 		return 'Rent due day must be a whole number from 1 to 31.';

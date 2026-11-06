@@ -1,6 +1,7 @@
 import { validateLeaseTerms } from '$lib/dashboard/leases';
 import {
 	canManageFinance,
+	canManageProperty,
 	canManageMaintenance,
 	canManageWorkspace,
 	getWorkspaceAccess
@@ -13,6 +14,11 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { randomUUID } from 'node:crypto';
 
 const sections = {
+	students: {
+		title: 'Student accommodation',
+		eyebrow: 'Campus living',
+		copy: 'Manage individual students, room capacity and academic terms.'
+	},
 	properties: {
 		title: 'Properties',
 		eyebrow: 'Portfolio',
@@ -150,6 +156,10 @@ const getManagedAccess = async (locals: App.Locals, organizationId: string) => {
 	const access = await getWorkspaceAccess(locals, organizationId);
 	return access && canManageWorkspace(access.membership.role) ? access : null;
 };
+const getPropertyAccess = async (locals: App.Locals, organizationId: string) => {
+	const access = await getWorkspaceAccess(locals, organizationId);
+	return access && canManageProperty(access.membership.role) ? access : null;
+};
 const getFinanceAccess = async (locals: App.Locals, organizationId: string) => {
 	const access = await getWorkspaceAccess(locals, organizationId);
 	return access && canManageFinance(access.membership.role) ? access : null;
@@ -188,6 +198,10 @@ export const load = async ({ locals, params, url }) => {
 	}
 	if (params.section === 'new-property')
 		throw redirect(303, `/workspace/${params.id}/properties?new=1`);
+	if (params.section === 'students' && !access.modules.some((m) => m.module_key === 'student'))
+		throw error(403, 'Student accommodation is not enabled for this workspace.');
+	if (params.section === 'setup' && access.membership.role === 'estate_manager')
+		throw redirect(303, `/workspace/${params.id}/properties`);
 	const section = sections[params.section as keyof typeof sections];
 	if (params.section === 'portfolio') throw redirect(303, `/workspace/${params.id}/properties`);
 	if (!section) throw error(404, 'Workspace section not found');
@@ -222,7 +236,7 @@ export const load = async ({ locals, params, url }) => {
 			locals.supabase
 				.from('properties')
 				.select(
-					'id, name, code, address_line_1, city, country, latitude, longitude, status, rental_mode'
+					'id, name, code, address_line_1, city, country, latitude, longitude, status, rental_mode, module_key'
 				)
 				.eq('organization_id', params.id)
 				.order('name')
@@ -249,7 +263,7 @@ export const load = async ({ locals, params, url }) => {
 			locals.supabase
 				.from('tenancies')
 				.select(
-					'id, space_id, lease_reference, status, start_date, end_date, rent_amount, deposit_amount, billing_frequency, rent_due_day, notice_period_days, move_in_at, move_out_at, notice_given_on, expected_move_out_on, inspection_notes, deposit_refund_amount, deposit_deduction_amount, settlement_notes, notes'
+					'id, space_id, lease_reference, status, start_date, end_date, rent_amount, deposit_amount, billing_frequency, rent_due_day, notice_period_days, academic_term_id, move_in_at, move_out_at, notice_given_on, expected_move_out_on, inspection_notes, deposit_refund_amount, deposit_deduction_amount, settlement_notes, notes'
 				)
 				.eq('organization_id', params.id)
 				.order('start_date', { ascending: false })
@@ -450,7 +464,7 @@ export const load = async ({ locals, params, url }) => {
 		(signedSupportAttachments.data ?? []).map((item) => [item.path, item.signedUrl])
 	);
 	const auditResult =
-		params.section === 'reports' && canManageWorkspace(access.membership.role)
+		params.section === 'reports' && canManageProperty(access.membership.role)
 			? await locals.supabase
 					.from('audit_logs')
 					.select('id, actor_user_id, action, entity_type, entity_id, created_at, metadata')
@@ -458,6 +472,17 @@ export const load = async ({ locals, params, url }) => {
 					.order('created_at', { ascending: false })
 					.limit(100)
 			: { data: [], error: null };
+	const [termResult, assignmentResult] = await Promise.all([
+		locals.supabase
+			.from('academic_terms')
+			.select('id,name,start_on,end_on,due_on')
+			.eq('organization_id', params.id)
+			.order('start_on'),
+		locals.supabase
+			.from('property_manager_assignments')
+			.select('user_id,property_id')
+			.eq('organization_id', params.id)
+	]);
 	const requestedProfileId = url.searchParams.get('person');
 	const profileId =
 		params.section === 'tenants' &&
@@ -472,6 +497,8 @@ export const load = async ({ locals, params, url }) => {
 		...access,
 		sectionKey: params.section,
 		profileId,
+		academicTerms: termResult.data ?? [],
+		propertyAssignments: assignmentResult.data ?? [],
 		auditEntries: auditResult.data ?? [],
 		auditUnavailable: Boolean(auditResult.error),
 		section,
@@ -513,6 +540,67 @@ export const load = async ({ locals, params, url }) => {
 };
 
 export const actions = {
+	assignEstateManager: async ({ request, locals, params }) => {
+		const access = await getManagedAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Portfolio manager access required.' });
+		const form = await request.formData();
+		const properties = form.getAll('property_ids').map(String);
+		if (!properties.length) return fail(400, { message: 'Select at least one property.' });
+		const result = await locals.supabase.rpc('assign_estate_manager', {
+			target_org: params.id,
+			target_user: value(form, 'user_id'),
+			properties
+		});
+		if (result.error) return fail(400, { message: result.error.message });
+		return { success: true, message: 'Estate manager assignments saved.' };
+	},
+	createStudentRoom: async ({ request, locals, params }) => {
+		const access = await getPropertyAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Property manager access required.' });
+		const form = await request.formData();
+		const result = await locals.supabase.rpc('create_student_room', {
+			target_property: value(form, 'property_id'),
+			room_name: value(form, 'room_name'),
+			bed_count: numberOrNull(form.get('bed_count')),
+			rent: numberOrNull(form.get('rent')),
+			deposit: numberOrNull(form.get('deposit')) ?? 0
+		});
+		if (result.error) return fail(400, { message: result.error.message });
+		return {
+			success: true,
+			message: 'Room and individual bed spaces created.',
+			nextStep: 3,
+			propertyId: value(form, 'property_id')
+		};
+	},
+	createAcademicTerm: async ({ request, locals, params }) => {
+		const access = await getManagedAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Portfolio manager access required.' });
+		const form = await request.formData();
+		const result = await locals.supabase.from('academic_terms').insert({
+			organization_id: params.id,
+			name: value(form, 'name'),
+			start_on: value(form, 'start_on'),
+			end_on: value(form, 'end_on'),
+			due_on: value(form, 'due_on')
+		});
+		if (result.error) return fail(400, { message: result.error.message });
+		return { success: true, message: 'Academic term added.' };
+	},
+	billAcademicTerm: async ({ request, locals, params }) => {
+		const access = await getFinanceAccess(locals, params.id);
+		if (!access) return fail(403, { message: 'Finance access required.' });
+		const form = await request.formData();
+		const result = await locals.supabase.rpc('bill_academic_term', {
+			target_lease: value(form, 'tenancy_id'),
+			target_term: value(form, 'academic_term_id')
+		});
+		if (result.error) return fail(400, { message: result.error.message });
+		return {
+			success: true,
+			message: 'Term accommodation charge is available. Repeated requests reuse the same charge.'
+		};
+	},
 	createSupportTicket: async ({ request, locals, params }) => {
 		const access = await getWorkspaceAccess(locals, params.id);
 		if (!access || access.supportMode)
@@ -613,6 +701,7 @@ export const actions = {
 			.insert({
 				organization_id: params.id,
 				name,
+				module_key: value(form, 'module_key') || 'residential',
 				code: value(form, 'code') || null,
 				address_line_1: value(form, 'address_line_1') || null,
 				city: value(form, 'city') || null,
@@ -644,7 +733,7 @@ export const actions = {
 		};
 	},
 	updatePropertyRentalMode: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const propertyId = value(form, 'property_id');
@@ -673,7 +762,7 @@ export const actions = {
 		};
 	},
 	updatePropertyStatus: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const status = value(form, 'status');
@@ -688,7 +777,7 @@ export const actions = {
 		return { success: true, message: 'Property status updated.' };
 	},
 	addSpace: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const propertyId = value(form, 'property_id');
@@ -778,7 +867,7 @@ export const actions = {
 		return { success: true, message: `${firstName} ${lastName} was added.` };
 	},
 	createTenant: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const { data: workspaceSettings } = await locals.supabase
@@ -812,7 +901,9 @@ export const actions = {
 		const status = form.has('checked_in') ? 'active' : 'draft';
 		if (!firstName || !lastName || !spaceId || !startDate || rent === null || rent < 0)
 			return fail(400, { message: 'Enter the tenant, space, start date, and rent.' });
-		if (!['weekly', 'monthly', 'quarterly', 'annual', 'custom'].includes(billingFrequency))
+		if (
+			!['weekly', 'monthly', 'quarterly', 'annual', 'custom', 'termly'].includes(billingFrequency)
+		)
 			return fail(400, { message: 'Choose a valid billing frequency.' });
 		if (form.has('checked_in') && startDate > new Date().toISOString().slice(0, 10))
 			return fail(400, { message: 'A checked-in tenant cannot have a future start date.' });
@@ -841,7 +932,7 @@ export const actions = {
 		};
 	},
 	updatePerson: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const personId = value(form, 'person_id');
@@ -875,7 +966,7 @@ export const actions = {
 		return { success: true, message: 'Tenant profile updated.' };
 	},
 	updateTenancy: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const tenancyId = value(form, 'tenancy_id');
@@ -920,7 +1011,7 @@ export const actions = {
 		return { success: true, message: 'Lease and rent schedule updated together.' };
 	},
 	leaseLifecycle: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const operation = value(form, 'operation');
@@ -946,7 +1037,7 @@ export const actions = {
 	endTenancy: async () =>
 		fail(400, { message: 'Use the lease move-out checklist to record inspection and settlement.' }),
 	updateDocumentApproval: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const documentId = value(form, 'document_id');
@@ -966,7 +1057,7 @@ export const actions = {
 		return { success: true, message: `Document marked ${approvalStatus}.` };
 	},
 	createTenancy: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const { data: workspaceSettings } = await locals.supabase
@@ -1182,6 +1273,8 @@ export const actions = {
 		const access = await getFinanceAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Finance or manager access is required.' });
 		const form = await request.formData();
+		if (access.membership.role === 'estate_manager' && !value(form, 'tenancy_id'))
+			return fail(400, { message: 'Choose a lease in one of your assigned properties.' });
 		const amount = numberOrNull(form.get('amount'));
 		if (amount === null || amount <= 0 || !value(form, 'payment_date'))
 			return fail(400, { message: 'Enter a payment amount and date.' });
@@ -1464,7 +1557,7 @@ export const actions = {
 		};
 	},
 	uploadDocument: async ({ request, locals, params }) => {
-		const access = await getManagedAccess(locals, params.id);
+		const access = await getPropertyAccess(locals, params.id);
 		if (!access) return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const file = form.get('file');
@@ -2322,6 +2415,11 @@ export const actions = {
 		const form = await request.formData();
 		const userId = value(form, 'user_id');
 		const role = value(form, 'role');
+		if (role === 'estate_manager')
+			return {
+				success: true,
+				message: 'Estate manager access is controlled by the property-assignment form above.'
+			};
 		if (!userId || !workspaceRoles.includes(role))
 			return fail(400, { message: 'Choose a valid team role.' });
 		const { data: member } = await locals.supabase

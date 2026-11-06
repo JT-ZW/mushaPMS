@@ -65,7 +65,7 @@ const safeFileName = (name: string) => name.replace(/[^a-zA-Z0-9._-]/g, '_');
 export const actions = {
 	updateTenant: async ({ request, locals, params }) => {
 		const access = await getWorkspaceAccess(locals, params.id);
-		if (!access || !['owner', 'admin', 'manager'].includes(access.membership.role))
+		if (!access || !['owner', 'admin', 'manager', 'estate_manager'].includes(access.membership.role))
 			return fail(403, { message: 'Workspace manager access is required.' });
 		const form = await request.formData();
 		const firstName = value(form, 'first_name');

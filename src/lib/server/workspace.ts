@@ -80,6 +80,9 @@ export const getWorkspaceAccess = async (locals: App.Locals, organizationId: str
 
 export const canManageWorkspace = (role: string) => ['owner', 'admin', 'manager'].includes(role);
 export const canManageFinance = (role: string) =>
-	['owner', 'admin', 'manager', 'finance'].includes(role);
+	['owner', 'admin', 'manager', 'finance', 'estate_manager'].includes(role);
 export const canManageMaintenance = (role: string) =>
-	['owner', 'admin', 'manager', 'maintenance'].includes(role);
+	['owner', 'admin', 'manager', 'maintenance', 'estate_manager'].includes(role);
+
+export const canManageProperty = (role: string) =>
+	canManageWorkspace(role) || role === 'estate_manager';

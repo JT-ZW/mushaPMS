@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EstateAssignments from '$lib/components/EstateAssignments.svelte';
+	import StudentAccommodation from '$lib/components/StudentAccommodation.svelte';
 	import WorkspaceChrome from '$lib/components/WorkspaceChrome.svelte';
 	import PropertyRegistrationModal from '$lib/components/PropertyRegistrationModal.svelte';
 	import { page } from '$app/state';
@@ -22,7 +24,8 @@
 	let { data, form } = $props();
 	let registrationOpen = $state(false);
 	$effect(() => {
-		if (data.user?.user_metadata?.must_change_password) settingsView = 'security';
+		if (data.membership.role === 'estate_manager' || data.user?.user_metadata?.must_change_password)
+			settingsView = 'security';
 	});
 	$effect(() => {
 		if (data.sectionKey === 'properties' && page.url.searchParams.get('new') === '1')
@@ -276,16 +279,20 @@
 						</div>{/if}
 				</section>
 			</div>
+		{:else if data.sectionKey === 'students'}
+			<StudentAccommodation {data} />
 		{:else if data.sectionKey === 'properties'}
 			<PropertiesOverview
 				organization={data.organization}
 				properties={data.properties}
 				spaces={data.spaces}
 				maintenance={data.maintenance}
+				canAdd={data.membership.role !== 'estate_manager'}
 				onAdd={() => (registrationOpen = true)}
 			/>
 			{#if registrationOpen}<PropertyRegistrationModal
 					organization={data.organization}
+					modules={data.modules}
 					properties={data.properties}
 					spaces={data.spaces}
 					form={form ?? undefined}
@@ -974,6 +981,7 @@
 		{:else if data.sectionKey === 'settings'}
 			<nav class="aligned-tabs" aria-label="Workspace settings sections">
 				{#each [['profile', 'Organization'], ['finance', 'Rent & billing'], ['alerts', 'Notifications'], ['team', 'Team access'], ['security', 'Account security']] as [key, title] (key)}<button
+						hidden={data.membership.role === 'estate_manager' && key !== 'security'}
 						type="button"
 						aria-pressed={settingsView === key}
 						onclick={() => (settingsView = key)}>{title}</button
@@ -1362,6 +1370,11 @@
 				</section>
 			</div>
 			<section class="panel team-panel" hidden={settingsView !== 'team'}>
+				<EstateAssignments
+					members={data.members}
+					properties={data.properties}
+					assignments={data.propertyAssignments}
+				/>
 				<div class="panel-heading">
 					<div>
 						<p class="eyebrow">Team access</p>
@@ -1431,8 +1444,9 @@
 									name="role"
 									value={member.role}
 									disabled={member.role === 'owner'}
-									onchange={(event) => event.currentTarget.form?.requestSubmit()}
-									>{#each ['admin', 'manager', 'finance', 'maintenance', 'viewer'] as role (role)}<option
+									>{#if member.role === 'estate_manager'}<option value="estate_manager"
+											>Estate manager (assigned properties)</option
+										>{/if}{#each ['admin', 'manager', 'finance', 'maintenance', 'viewer'] as role (role)}<option
 											value={role}>{role}</option
 										>{/each}</select
 								>

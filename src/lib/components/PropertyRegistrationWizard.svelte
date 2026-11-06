@@ -15,6 +15,7 @@
 		longitude: number | string | null;
 		status: string;
 		rental_mode?: string | null;
+		module_key?: string;
 	};
 	type Space = {
 		id: string;
@@ -31,6 +32,7 @@
 
 	let {
 		organization,
+		modules = [],
 		properties,
 		spaces,
 		form,
@@ -38,6 +40,7 @@
 		onComplete,
 		busy = $bindable(false)
 	} = $props<{
+		modules?: { module_key: string }[];
 		organization: { id: string; currency_code: string };
 		properties: Property[];
 		spaces: Space[];
@@ -195,6 +198,20 @@
 					class="form-stack"
 				>
 					<input type="hidden" name="rental_mode" value="whole_property" />
+					<label
+						>Property module<select name="module_key" required
+							>{#each modules.length ? modules : [{ module_key: 'residential' }] as module (module.module_key)}<option
+									value={module.module_key}
+									>{module.module_key === 'student'
+										? 'Student accommodation'
+										: module.module_key === 'short_stay'
+											? 'Short stay'
+											: module.module_key === 'commercial'
+												? 'Commercial'
+												: 'Residential'}</option
+								>{/each}</select
+						></label
+					>
 					<div class="form-grid two">
 						<label
 							>Property name<input
@@ -272,7 +289,7 @@
 					>{/each}
 			</div>
 			<div class="mode-grid">
-				{#each modes as mode (mode.key)}<button
+				{#each modes.filter((mode) => selectedProperty?.module_key !== 'student' || mode.key === 'room_by_room') as mode (mode.key)}<button
 						class:chosen={rentalMode === mode.key}
 						class="mode-card"
 						type="button"
@@ -300,7 +317,7 @@
 				<input type="hidden" name="property_id" value={selectedPropertyId} /><input
 					type="hidden"
 					name="rental_mode"
-					value={rentalMode}
+					value={selectedProperty?.module_key === 'student' ? 'room_by_room' : rentalMode}
 				/>
 				<div>
 					<strong>{modeTitle(rentalMode)}</strong><small
@@ -327,36 +344,12 @@
 					>← Change rental model</button
 				>
 			</div>
-			<div class="inventory-context">
-				<div>
-					<span class="property-mark">⌂</span><span
-						><strong>{selectedProperty?.name}</strong><small
-							>{modeTitle(rentalMode)} · {selectedSpaces.length} spaces configured</small
-						></span
-					>
-				</div>
-				<span class="context-status">{selectedSpaces.length ? 'In progress' : 'Start here'}</span>
-			</div>
-			<div class="space-actions">
-				<button
-					class:active={rentalMode !== 'room_by_room'}
-					type="button"
-					onclick={() => (showRoomForm = false)}
-					><span>⌂</span><strong>Add whole property</strong><small
-						>One lease covers the property</small
-					></button
-				><button
-					class:active={rentalMode !== 'whole_property'}
-					type="button"
-					onclick={() => (showRoomForm = true)}
-					><span>＋</span><strong>Add a room or space</strong><small
-						>Each space can have its own tenant</small
-					></button
-				>
-			</div>
-			{#if rentalMode === 'room_by_room' || showRoomForm}
+
+			{#if selectedProperty?.module_key === 'student'}
 				<form
 					method="POST"
+					action="?/createStudentRoom"
+					class="form-stack"
 					use:enhance={() => {
 						busy = true;
 						return async ({ update }) => {
@@ -367,106 +360,189 @@
 							}
 						};
 					}}
-					action="?/addSpace"
-					class="panel nested-form"
 				>
-					<input type="hidden" name="property_id" value={selectedPropertyId} /><input
-						type="hidden"
-						name="kind"
-						value="room"
-					/>
+					<input type="hidden" name="property_id" value={selectedPropertyId} />
+					<p>
+						Set the room capacity. Each place becomes an individually rentable bed, so students keep
+						separate leases and accounts.
+					</p>
 					<div class="form-grid three">
-						<label
-							>Room / space name<input
-								name="name"
-								required
-								placeholder="Room 1 or Cottage A"
-							/></label
-						><label>Code<input name="code" placeholder="R-01" /></label><label
-							>Floor / block<input name="floor_label" placeholder="Ground floor" /></label
-						>
-					</div>
-					<div class="form-grid three">
-						<label
-							>Monthly rent ({currency})<input
-								name="monthly_rent"
+						<label>Room name<input name="room_name" required placeholder="Room 1" /></label><label
+							>Student capacity<input
+								name="bed_count"
 								type="number"
-								min="0"
-								step="0.01"
-								placeholder="0.00"
+								min="1"
+								max="100"
+								required
 							/></label
 						><label
-							>Deposit ({currency})<input
-								name="deposit_amount"
+							>Monthly rent per student<input
+								name="rent"
 								type="number"
 								min="0"
 								step="0.01"
-								placeholder="0.00"
+								required
 							/></label
-						><label>Capacity<input name="capacity" type="number" min="1" placeholder="1" /></label>
+						><label
+							>Deposit per student<input
+								name="deposit"
+								type="number"
+								min="0"
+								step="0.01"
+								value="0"
+								required
+							/></label
+						>
 					</div>
-					{#if rootSpaces.length}<label
-							>Parent space <small>Optional · use this for a room inside a unit</small><select
-								name="parent_space_id"
-								><option value="">Top-level space</option
-								>{#each rootSpaces as space (space.id)}<option value={space.id}
-										>{space.name} · {space.kind}</option
-									>{/each}</select
-							></label
-						>{/if}<button class="primary" type="submit" data-no-feedback="true"
-						>Add room to {selectedProperty?.name} <span>＋</span></button
+					<button type="submit" class="primary" data-no-feedback="true" disabled={busy}
+						>Create room and bed places</button
 					>
 				</form>
 			{:else}
-				<form
-					method="POST"
-					use:enhance={() => {
-						busy = true;
-						return async ({ update }) => {
-							try {
-								await update({ reset: false });
-							} finally {
-								busy = false;
-							}
-						};
-					}}
-					action="?/addSpace"
-					class="panel nested-form"
-				>
-					<input type="hidden" name="property_id" value={selectedPropertyId} /><input
-						type="hidden"
-						name="kind"
-						value="unit"
-					/>
-					<div class="form-grid three">
-						<label>Property unit name<input name="name" required placeholder="Main house" /></label
-						><label>Code<input name="code" placeholder="UNIT-01" /></label><label
-							>Floor / block<input name="floor_label" placeholder="Ground floor" /></label
+				<div class="inventory-context">
+					<div>
+						<span class="property-mark">⌂</span><span
+							><strong>{selectedProperty?.name}</strong><small
+								>{modeTitle(rentalMode)} · {selectedSpaces.length} spaces configured</small
+							></span
 						>
 					</div>
-					<div class="form-grid three">
-						<label
-							>Monthly rent ({currency})<input
-								name="monthly_rent"
-								type="number"
-								min="0"
-								step="0.01"
-								placeholder="0.00"
-							/></label
-						><label
-							>Deposit ({currency})<input
-								name="deposit_amount"
-								type="number"
-								min="0"
-								step="0.01"
-								placeholder="0.00"
-							/></label
-						><label>Bedrooms<input name="bedrooms" type="number" min="0" placeholder="3" /></label>
-					</div>
-					<button class="primary" type="submit" data-no-feedback="true"
-						>Add whole-property unit <span>＋</span></button
+					<span class="context-status">{selectedSpaces.length ? 'In progress' : 'Start here'}</span>
+				</div>
+				<div class="space-actions">
+					<button
+						class:active={rentalMode !== 'room_by_room'}
+						type="button"
+						onclick={() => (showRoomForm = false)}
+						><span>⌂</span><strong>Add whole property</strong><small
+							>One lease covers the property</small
+						></button
+					><button
+						class:active={rentalMode !== 'whole_property'}
+						type="button"
+						onclick={() => (showRoomForm = true)}
+						><span>＋</span><strong>Add a room or space</strong><small
+							>Each space can have its own tenant</small
+						></button
 					>
-				</form>
+				</div>
+				{#if rentalMode === 'room_by_room' || showRoomForm}
+					<form
+						method="POST"
+						use:enhance={() => {
+							busy = true;
+							return async ({ update }) => {
+								try {
+									await update({ reset: false });
+								} finally {
+									busy = false;
+								}
+							};
+						}}
+						action="?/addSpace"
+						class="panel nested-form"
+					>
+						<input type="hidden" name="property_id" value={selectedPropertyId} /><input
+							type="hidden"
+							name="kind"
+							value="room"
+						/>
+						<div class="form-grid three">
+							<label
+								>Room / space name<input
+									name="name"
+									required
+									placeholder="Room 1 or Cottage A"
+								/></label
+							><label>Code<input name="code" placeholder="R-01" /></label><label
+								>Floor / block<input name="floor_label" placeholder="Ground floor" /></label
+							>
+						</div>
+						<div class="form-grid three">
+							<label
+								>Monthly rent ({currency})<input
+									name="monthly_rent"
+									type="number"
+									min="0"
+									step="0.01"
+									placeholder="0.00"
+								/></label
+							><label
+								>Deposit ({currency})<input
+									name="deposit_amount"
+									type="number"
+									min="0"
+									step="0.01"
+									placeholder="0.00"
+								/></label
+							><label>Capacity<input name="capacity" type="number" min="1" placeholder="1" /></label
+							>
+						</div>
+						{#if rootSpaces.length}<label
+								>Parent space <small>Optional · use this for a room inside a unit</small><select
+									name="parent_space_id"
+									><option value="">Top-level space</option
+									>{#each rootSpaces as space (space.id)}<option value={space.id}
+											>{space.name} · {space.kind}</option
+										>{/each}</select
+								></label
+							>{/if}<button class="primary" type="submit" data-no-feedback="true"
+							>Add room to {selectedProperty?.name} <span>＋</span></button
+						>
+					</form>
+				{:else}
+					<form
+						method="POST"
+						use:enhance={() => {
+							busy = true;
+							return async ({ update }) => {
+								try {
+									await update({ reset: false });
+								} finally {
+									busy = false;
+								}
+							};
+						}}
+						action="?/addSpace"
+						class="panel nested-form"
+					>
+						<input type="hidden" name="property_id" value={selectedPropertyId} /><input
+							type="hidden"
+							name="kind"
+							value="unit"
+						/>
+						<div class="form-grid three">
+							<label
+								>Property unit name<input name="name" required placeholder="Main house" /></label
+							><label>Code<input name="code" placeholder="UNIT-01" /></label><label
+								>Floor / block<input name="floor_label" placeholder="Ground floor" /></label
+							>
+						</div>
+						<div class="form-grid three">
+							<label
+								>Monthly rent ({currency})<input
+									name="monthly_rent"
+									type="number"
+									min="0"
+									step="0.01"
+									placeholder="0.00"
+								/></label
+							><label
+								>Deposit ({currency})<input
+									name="deposit_amount"
+									type="number"
+									min="0"
+									step="0.01"
+									placeholder="0.00"
+								/></label
+							><label>Bedrooms<input name="bedrooms" type="number" min="0" placeholder="3" /></label
+							>
+						</div>
+						<button class="primary" type="submit" data-no-feedback="true"
+							>Add whole-property unit <span>＋</span></button
+						>
+					</form>
+				{/if}
 			{/if}
 			{#if selectedSpaces.length}<div class="space-list">
 					{#each selectedSpaces as space (space.id)}<div class="space-row">

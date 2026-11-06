@@ -27,6 +27,7 @@
 	const nav = [
 		{ key: 'overview', label: 'Overview', suffix: '' },
 		{ key: 'properties', label: 'Properties', suffix: '/properties' },
+		{ key: 'students', label: 'Student accommodation', suffix: '/students' },
 		{ key: 'people', label: 'People & leases', suffix: '/people' },
 		{ key: 'finance', label: 'Finance & collections', suffix: '/finance' },
 		{ key: 'maintenance', label: 'Maintenance', suffix: '/maintenance' },
@@ -45,7 +46,9 @@
 			<span><small>PROPERTY MANAGEMENT</small></span>
 		</a>
 		<div class="workspace-name">
-			<strong>{organization.name}</strong><small>{organization.currency_code} · {role}</small>
+			<strong>{organization.name}</strong><small
+				>{organization.currency_code} · {role.replaceAll('_', ' ')}</small
+			>
 		</div>
 		<button
 			type="button"
@@ -57,7 +60,7 @@
 		>
 		<p class="nav-label">Workspace</p>
 		<nav id="workspace-navigation" aria-label="Workspace navigation">
-			{#each nav as item (item.key)}
+			{#each nav.filter((item) => (item.key !== 'students' || modules.some((m: Module) => m.module_key === 'student')) && (role !== 'estate_manager' || !['setup', 'vendors'].includes(item.key))) as item (item.key)}
 				<a
 					class:active={active === item.key ||
 						(item.key === 'people' &&

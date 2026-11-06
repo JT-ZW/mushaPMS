@@ -713,7 +713,9 @@
 										method="POST"
 										action="?/approveMaintenanceCost"
 										hidden={!data.membership ||
-											!['owner', 'admin', 'manager', 'finance'].includes(data.membership.role) ||
+											!['owner', 'admin', 'manager', 'finance', 'estate_manager'].includes(
+												data.membership.role
+											) ||
 											Boolean(request.cost_approved_at)}
 										use:enhance={workspaceSubmit}
 										data-managed-feedback="true"

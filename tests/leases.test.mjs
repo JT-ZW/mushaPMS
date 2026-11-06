@@ -19,3 +19,7 @@ test('lease terms reject reversed dates, invalid due days and negative amounts',
 	assert.ok(validateLeaseTerms('2026-10-01', '', 'monthly', 1, -1, 30));
 	assert.ok(validateLeaseTerms('2026-10-01', '', 'monthly', 1, 100, 1.5));
 });
+
+test('termly billing is a distinct supported frequency', () => {
+	assert.equal(validateLeaseTerms('2026-10-01', '2027-07-01', 'termly', null, 100, 30), null);
+});

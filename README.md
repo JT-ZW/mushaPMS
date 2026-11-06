@@ -90,3 +90,7 @@ Run the calculation checks with `node --test tests/dashboard.test.mjs`.
 ## Connected operational workflows
 
 The connected onboarding, payments, maintenance approvals, lease lifecycle, daily actions, and audit controls require the new `20261027130000_connected_workflows.sql` migration. See [activation and acceptance checks](docs/connected-workflows.md) before using these workflows. Run the complete regression suite with `npm.cmd test`.
+
+## Estate managers and student accommodation
+
+Apply the new `20261029100000_estate_managers_and_students.sql` migration after the connected-workflows migration. See [estate manager and student module setup](docs/estate-managers-and-students.md) for property assignments, module enablement, bed allocation, academic-term billing, and acceptance checks.

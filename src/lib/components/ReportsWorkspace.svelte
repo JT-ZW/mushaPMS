@@ -274,7 +274,8 @@
 		['maintenance', 'Maintenance analytics'],
 		['finance', 'Operating finance'],
 		['quality', 'Data quality'],
-		...(data.membership && ['owner', 'admin', 'manager'].includes(data.membership.role)
+		...(data.membership &&
+		['owner', 'admin', 'manager', 'estate_manager'].includes(data.membership.role)
 			? [['audit', 'Audit history']]
 			: [])
 	]);
@@ -775,8 +776,8 @@
 						<p class="eyebrow">Management oversight</p>
 						<h3>Recent audit history</h3>
 						<p class="muted">
-							Latest 100 workspace events across all periods. Actor IDs identify the account
-							responsible.
+							Latest 100 visible property and workspace events across all periods. Actor IDs
+							identify the account responsible.
 						</p>
 					</div>
 				</div>
